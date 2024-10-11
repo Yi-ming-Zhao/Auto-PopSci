@@ -1,3 +1,3 @@
-# crawler-for-popsci
+# Auto-PopSci
 
-This is the repository of the crawlers to build a corpus of PopSci articles.
+Project that aims to automate the process of popularization of science.
