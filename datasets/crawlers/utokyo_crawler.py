@@ -8,6 +8,10 @@ def tag_p_with_no_class(tag):
     return tag.name == "p" and not tag.has_attr("class")
 
 
+def tag_with_doi_link(tag):
+    return tag.name == "a" and tag.has_attr("href") and "Publication" in tag.get_text()
+
+
 # 目标URL
 url = "https://www.u-tokyo.ac.jp/focus/en/press/index.php?pageID=1"
 
@@ -44,6 +48,7 @@ if df.empty:
                     "date": date,
                     "is_news": is_news,
                     "content": None,
+                    "paper_url": None,
                 }
                 if article_dict["is_news"] == "Research news":
                     article_list.append(article_dict)
@@ -60,13 +65,15 @@ for index, rows in tqdm(df.iterrows(), desc="Retrieving content", total=df.shape
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
             sentence_list = soup.find_all(tag_p_with_no_class)
-            passage = ""
-            for sentence in sentence_list:
-                if "Giving to Utokyo" in sentence.get_text(strip=True):
-                    continue
-                sentence = sentence.get_text(strip=True) + "\n"
-                passage += sentence
-            df.at[index, "content"] = passage
+            current_paper_url_list = soup.find_all(tag_with_doi_link)
+            for link in current_paper_url_list:
+                df.at[index, "paper_url"] = link["href"]
+            # passage = ""
+            # for sentence in sentence_list:
+            #     if "UTokyo" in sentence.get_text(strip=True):
+            #         continue
+            #     passage += sentence.get_text(strip=True) + "\n"
+            # df.at[index, "content"] = passage
             # print(passage)
         else:
             raise Exception(
