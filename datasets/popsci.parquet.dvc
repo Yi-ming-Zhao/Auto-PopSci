@@ -1,0 +1,5 @@
+outs:
+- md5: 89eca8bf94cff17f63a4595902a5ad14
+  size: 850940
+  hash: md5
+  path: popsci.parquet
