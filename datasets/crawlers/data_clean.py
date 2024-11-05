@@ -1,14 +1,14 @@
 import pandas as pd
 from tqdm import tqdm
 
+# 读取 Parquet 文件
 df = pd.read_parquet("datasets/popsci.parquet")
 
-for index, rows in tqdm(df.iterrows(), total=df.shape[0]):
-    substr = ""
-    substr = df.loc[index, "content"]
-    deleted = substr[:16]
-    substr = substr[16:]
-    print(deleted)
-    df.loc[index, "content"] = substr[16:]
+# 删除包含 NaN 的行
+new_df = df.dropna(subset=["paper_url"])
 
-df.to_parquet("datasets/popsci.parquet", engine="pyarrow", index=False)
+# 选择特定列
+selected_columns = new_df[["title", "paper_url"]]
+
+# 输出选定的列
+print(selected_columns.to_string())
