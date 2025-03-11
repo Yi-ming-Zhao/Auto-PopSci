@@ -1,4 +1,5 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 import torch
 import bitsandbytes
 from transformers import (
@@ -17,15 +18,14 @@ from tensorboardX import SummaryWriter
 from rouge import Rouge
 import time
 
-# 设置要使用的 GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-
+model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+dataset_name = "dongqi-me/SciNews"
 current_time = time.strftime("%Y-%m-%d__%H:%M", time.localtime())
-my_writer = SummaryWriter(log_dir=current_time)
+log_dir = f"baselines/meta-llama/Meta-Llama-3.1-8B-Instruct/runs/{current_time}"
+my_writer = SummaryWriter(log_dir=log_dir)
 
 # bitsandbytes configuration
 compute_dtype = getattr(torch, "float16")
-use_4bit = True
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
@@ -33,8 +33,6 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=False,
 )
 
-model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-dataset_name = "dongqi-me/SciNews"
 
 # Check GPU compatibility with bfloat16
 if compute_dtype == torch.float16 and use_4bit:
@@ -45,7 +43,7 @@ if compute_dtype == torch.float16 and use_4bit:
         print("=" * 80)
 
 # Load model, tokenizer and dataset
-model = AutoModelForCausalLM.from_pretrained(model_name, bnb_config)
+model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=bnb_config)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
