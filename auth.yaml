@@ -1,0 +1,5 @@
+deepseek:
+  reasoner:
+    api_key: "sk-f2b58c6a76c44f02a909d945d2bef443"
+    base_url: "https://api.deepseek.com"
+    model: "deepseek-reasoner"

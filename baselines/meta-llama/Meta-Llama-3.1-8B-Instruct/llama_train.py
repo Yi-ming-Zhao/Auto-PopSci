@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import torch
 import bitsandbytes
 from transformers import (
@@ -20,30 +20,14 @@ import time
 
 model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 dataset_name = "dongqi-me/SciNews"
-current_time = time.strftime("%Y-%m-%d__%H:%M", time.localtime())
+current_time = time.strftime("%Y-%m-%d--%H:%M", time.localtime())
 log_dir = f"baselines/meta-llama/Meta-Llama-3.1-8B-Instruct/runs/{current_time}"
 my_writer = SummaryWriter(log_dir=log_dir)
 
-# bitsandbytes configuration
-compute_dtype = getattr(torch, "float16")
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=compute_dtype,
-    bnb_4bit_use_double_quant=False,
-)
-
-
-# Check GPU compatibility with bfloat16
-if compute_dtype == torch.float16 and use_4bit:
-    major, _ = torch.cuda.get_device_capability()
-    if major >= 8:
-        print("=" * 80)
-        print("Your GPU supports bfloat16: accelerate training with bf16=True")
-        print("=" * 80)
-
 # Load model, tokenizer and dataset
-model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=bnb_config)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
@@ -59,22 +43,58 @@ lora_config = LoraConfig(
     task_type="CAUSAL_LM",
 )
 
-instruct = "Suppose that you are a scientist who is very capable of writing science popularization articles. You have just published a paper on a new scientific discovery. You want to write a news article to introduce this discovery to the public. The following is the content of the paper. Please write the corresponding news article."
 
+instruction = "Suppose that you are a scientist who is very capable of writing science popularization articles. You have just published a paper on a new scientific discovery. You want to write a news article to introduce this discovery to the public. The following is the content of the paper. Please write the corresponding news article."
+
+
+def convert_to_conversation(sample):
+    conversation = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": instruction},
+                {"type": "text", "text": sample["Paper_Body"]},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": sample["News_Body"]}],
+        },
+    ]
+    return {"messages": conversation}
+
+
+raw_dataset_train = dataset["train"].select(range(800))
+converted_dataset_train = [
+    convert_to_conversation(sample) for sample in raw_dataset_train
+]
+pprint(converted_dataset_train)
+raw_dataset_test = dataset["test"].select(range(100))
+converted_dataset_test = [
+    convert_to_conversation(sample) for sample in raw_dataset_test
+]
+raw_dataset_eval = dataset["validation"].select(range(100))
+converted_dataset_eval = [
+    convert_to_conversation(sample) for sample in raw_dataset_eval
+]
+
+# pprint(converted_dataset_train)
+# pprint(converted_dataset_test)
+# pprint(converted_dataset_eval)
 
 def preprocess_function(examples):
-    inputs = [instruct + " " + paper_body for paper_body in examples["Paper_Body"]]
-    pprint("inputs", inputs)
+
+    # pprint(inputs)
     model_inputs = tokenizer(
         examples["Paper_Body"], padding="max_length", truncation=True
     )
-    pprint("tokenized_model_inputs", model_inputs)
+    # pprint(model_inputs)
     labels = tokenizer(
         text_target=examples["News_Body"], padding="max_length", truncation=True
     )
-    pprint("tokenized_labels", labels)
+    # pprint(labels)
     model_inputs["labels"] = labels["input_ids"]
-    pprint("model_inputs_with_summary", model_inputs)
+    # pprint(model_inputs)
 
     # 确保输入和标签的长度一致
     # for i in range(len(model_inputs["input_ids"])):
@@ -87,9 +107,9 @@ def preprocess_function(examples):
 
 
 tokenized_dataset = dataset.map(preprocess_function, batched=True)
-dataset["train"] = tokenized_dataset["train"].select(range(800))
-dataset["validation"] = tokenized_dataset["validation"].select(range(100))
-dataset["test"] = tokenized_dataset["test"].shuffle(seed=42).select(range(100))
+# dataset["train"] = tokenized_dataset["train"].select(range(800))
+# dataset["validation"] = tokenized_dataset["validation"].select(range(100))
+# dataset["test"] = tokenized_dataset["test"].shuffle(seed=42).select(range(100))
 
 # model = get_peft_model(model, lora_config)
 
@@ -111,7 +131,6 @@ training_args = TrainingArguments(
     weight_decay=0.001,
     group_by_length=True,
     lr_scheduler_type="constant",
-    packing=False,
     report_to="tensorboard",
 )
 
