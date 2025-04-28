@@ -9,25 +9,25 @@ from prompts.prompt_template import prompt
 from openai import AsyncOpenAI
 from pprint import pprint
 import time
+import json
 
 
-async def extract_keyfacts(args, paper, paper_title):
+async def generate_popsci_from_keyfacts(args, key_facts, paper_title, paper):
     """
-    Extract keyfacts from the provided paper.
-    Output should be a list of key facts, each fact should be formatted as a dictionary with the following keys: "entity", "behavior", "context".
+    Generate popsci from the provided key facts.
+    Output should be a list of popsci, each popsci should be formatted as a dictionary with the following keys: "title", "content".
     """
     start_time = time.time()
-    print(f"Extracting key facts from the paper: {paper_title}")
+    print(f"Generating popsci from the key facts: {paper_title}")
     auth_info = read_yaml_file("auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
-    client = AsyncOpenAI(
-        api_key=current_api_key,
-        base_url=current_base_url,
+    client = AsyncOpenAI(api_key=current_api_key, base_url=current_base_url)
+    prompt_text = prompt["popsci_generation_from_keyfacts"].format(
+        key_facts=key_facts, paper=paper
     )
-    prompt_text = prompt["key_fact_extraction"].format(paper=paper)
-    # print(prompt_text)
+
     try:
         response = await client.chat.completions.create(
             model=current_model,
@@ -44,22 +44,21 @@ async def extract_keyfacts(args, paper, paper_title):
 
     if response and response.choices:
         result = response.choices[0].message.content
-        print(f"Key facts extraction result: {result}")
+        print(f"Popsci generation result: {result}")
         end_time = time.time()
-        print(f"Key facts extraction took {end_time - start_time:.2f} seconds.")
+        print(f"Popsci generation took {end_time - start_time:.2f} seconds.")
         return result
     else:
-        return "No keyfacts found."
+        return "No popsci generated."
 
 
-async def async_multiple_keyfacts_extraction(args):
+async def async_multiple_popsci_generation(args, key_fact_paths):
     """
-    Saves the extracted key facts to a file.
+    Generates popsci from the provided key facts.
     """
-    # get key facts from the paper
+    # get popsci from the key facts
     papers = []
     paper_titles = []
-    keyfacts_paths = []
     if args.paper_mode == "dataset":
         raise NotImplementedError("Reading in dataset mode is not implemented yet.")
     elif args.paper_mode == "single_paper":
@@ -69,17 +68,15 @@ async def async_multiple_keyfacts_extraction(args):
         paper_titles.append(title)
     else:
         raise ValueError("Invalid mode. Use 'dataset' or 'single_paper'.")
-    key_facts_extraction_tasks = [
-        extract_keyfacts(args, paper, paper_titles[i]) for i, paper in enumerate(papers)
-    ]
-    key_facts_of_papers = await asyncio.gather(*key_facts_extraction_tasks)
 
-    for i, key_facts in enumerate(key_facts_of_papers):
-        output_file_name = f"{paper_titles[i]}_key_facts.json"
-        current_keyfacts_path = save_key_facts_to_file(
-            key_facts, args.key_fact_output_dir, output_file_name
+    for i, paper in enumerate(papers):
+        key_fact_path = key_fact_paths[i]
+        with open(key_fact_path, "r") as file:
+            key_facts = json.load(file)
+        paper_title = paper_titles[i]
+        popsci = await generate_popsci_from_keyfacts(
+            args, key_facts, paper_title, paper
         )
-        keyfacts_paths.append(current_keyfacts_path)
-        print(f"Key facts for paper {i} saved to {current_keyfacts_path}")
-
-    return keyfacts_paths
+        save_key_facts_to_file(
+            popsci, args.popsci_output_dir, f"{paper_title}_popsci.json"
+        )

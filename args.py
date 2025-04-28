@@ -27,5 +27,17 @@ def parse_args():
         choices=["dataset", "single_paper"],
         help="Mode of the paper file (dataset or single paper).",
     )
+    parser.add_argument(
+        "--key_fact_output_dir",
+        type=str,
+        default="output/key_facts/",
+        help="Directory to save the extracted key facts.",
+    )
+    parser.add_argument(
+        "--popsci_output_dir",
+        type=str,
+        default="output/popsci/",
+        help="Directory to save the generated popsci.",
+    )
     args = parser.parse_args()
     return args
