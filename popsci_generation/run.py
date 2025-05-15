@@ -5,7 +5,7 @@ from popsci_generation import (
     async_multiple_popsci_generation_ordinary,
 )
 import asyncio
-from utils import get_paper_content, get_paper_titles, save_key_facts_to_file
+from utils.utils import get_paper_content, get_paper_titles, save_key_facts_to_file
 
 
 def main(args):
