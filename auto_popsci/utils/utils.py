@@ -1,3 +1,10 @@
+import asyncio
+from prompts.prompt_template import prompt
+from openai import AsyncOpenAI
+from pprint import pprint
+import time
+
+
 def read_yaml_file(file_path):
     """
     Reads a YAML file and returns its content as a dictionary.
@@ -109,6 +116,50 @@ def save_popsci_to_file(popsci, output_dir, output_file_name):
     return output_file
 
 
+def get_papers_from_dataset(path, dataset_format, is_paperbody_or_news):
+    """
+    Reads the content of a dataset file and returns the papers and their titles.
+
+    Args:
+        path (str): The path to the dataset file.
+        dataset_format (str): The format of the dataset (e.g., "parquet" or "json").
+        is_paperbody_or_news (str): Whether the input of keyfact extraction is a paper body or a news body.
+
+    Returns:
+        list: A list of papers.
+        list: A list of titles.
+    """
+    import pandas as pd
+    import tqdm
+
+    if dataset_format == "json":
+        with open(path, "r") as file:
+            if is_paperbody_or_news == "Paper_Body":
+                df = pd.read_json(file)
+                # Remove rows with NaN values in the 'paper_url' column
+                df = df.dropna(subset=["Paper_Body"])
+                # Select specific columns
+                selected_columns = df[["News_Title", "Paper_Body"]]
+                papers = selected_columns["Paper_Body"].tolist()
+                titles = selected_columns["News_Title"].tolist()
+                return papers, titles
+            elif is_paperbody_or_news == "News_Body":
+                df = pd.read_json(file)
+                # Remove rows with NaN values in the 'paper_url' column
+                df = df.dropna(subset=["News_Body"])
+                # Select specific columns
+                selected_columns = df[["News_Title", "News_Body"]]
+                papers = selected_columns["News_Body"].tolist()
+                titles = selected_columns["News_Title"].tolist()
+                return papers, titles
+            else:
+                raise ValueError("Invalid mode. Use 'Paper_Body' or 'News_Body'.")
+    elif dataset_format == "parquet":
+        raise NotImplementedError("Reading in parquet format is not implemented yet.")
+    else:
+        raise ValueError("Invalid dataset format. Use 'json' or 'parquet'.")
+
+
 async def extract_keyfacts(args, paper, paper_title):
     """
     Extract keyfacts from the provided paper.
@@ -116,7 +167,7 @@ async def extract_keyfacts(args, paper, paper_title):
     """
     start_time = time.time()
     print(f"Extracting key facts from the paper: {paper_title}")
-    auth_info = read_yaml_file("auth.yaml")
+    auth_info = read_yaml_file("auto_popsci/auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
@@ -124,7 +175,7 @@ async def extract_keyfacts(args, paper, paper_title):
         api_key=current_api_key,
         base_url=current_base_url,
     )
-    prompt_text = prompt["key_fact_extraction"].format(paper=paper)
+    prompt_text = prompt[args.prompt_template].format(paper=paper)
     # print(prompt_text)
     try:
         response = await client.chat.completions.create(
@@ -159,7 +210,9 @@ async def async_multiple_keyfacts_extraction(args):
     paper_titles = []
     keyfacts_paths = []
     if args.paper_mode == "dataset":
-        raise NotImplementedError("Reading in dataset mode is not implemented yet.")
+        papers, paper_titles = get_papers_from_dataset(
+            args.paper_path, args.dataset_format, args.is_paperbody_or_news
+        )
     elif args.paper_mode == "single_paper":
         body = get_paper_content(args.paper_path, args.paper_mode)
         papers.append(body)
