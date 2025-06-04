@@ -1,4 +1,4 @@
-from keyfact_extraction import async_multiple_keyfacts_extraction
+from 
 from args import parse_args
 import asyncio
 
