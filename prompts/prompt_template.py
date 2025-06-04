@@ -14,7 +14,7 @@ prompt = {
     2. Since your audience will primarily be children, use personification to personify the entities in the key facts and draft a story synopsis that includes all the elements in the key facts list.
     3. According to the story synopsis, write a popular science article that is easy to understand for children aged 8-12. The article should be engaging and informative, and should not contain any technical jargon or complex concepts. The article should be written in a way that is suitable for children, and should be no more than 500 words long.
     
-    Your output should be a dictionary with the following keys: "title", "synopsis", "content". The "title" key should contain the title of the article, the "synopsis" key should contain the synopsis of the article you generated, and the "content" key should contain the content of the article. The output string should be in JSON format, and should be able to directly parse into a JSON object, which means only the structured popsci article should be included. Don't output anything like ```json at the beginning and ``` at the end. 
+    Your output should be a text string that contains the popular science article. 
     
     The key facts are as follows:
     {key_facts}

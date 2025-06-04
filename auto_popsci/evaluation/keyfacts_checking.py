@@ -148,9 +148,33 @@ async def async_single_paper_keyfacts_precision_calculation(
         "priority_3": tp_3 / tp_plus_fp_3 if tp_plus_fp_3 > 0 else -1,
         "overall": tp_overall / tp_plus_fp_overall if tp_plus_fp_overall > 0 else -1,
     }
+    recalls = {
+        "priority_1": (
+            tp_1 / len(ground_truth_priority_1)
+            if len(ground_truth_priority_1) > 0
+            else -1
+        ),
+        "priority_2": (
+            tp_2 / len(ground_truth_priority_2)
+            if len(ground_truth_priority_2) > 0
+            else -1
+        ),
+        "priority_3": (
+            tp_3 / len(ground_truth_priority_3)
+            if len(ground_truth_priority_3) > 0
+            else -1
+        ),
+        "overall": (
+            tp_overall / len(ground_truth_dict) if len(ground_truth_dict) > 0 else -1
+        ),
+    }
+    print(f"Recalls for paper: {recalls}")
     print(f"Precision for paper: {precisions}")
-
-    return precisions
+    res = {
+        "recalls": recalls,
+        "precisions": precisions,
+    }
+    return res
 
 
 async def async_multiple_keyfacts_precision_calculation(
@@ -175,8 +199,8 @@ async def async_multiple_keyfacts_precision_calculation(
                 ground_truth_paths[i], keyfact_path, args
             )
         )
-    precision_scores = await asyncio.gather(*tasks)
-    return precision_scores
+    scores = await asyncio.gather(*tasks)
+    return scores
 
 
 async def main(args):
@@ -204,17 +228,26 @@ async def main(args):
     print("Ground truth paths:", ground_truth_paths)
     print("Key fact paths:", keyfact_paths)
     # Calculate precision scores
-    precision_scores = await async_multiple_keyfacts_precision_calculation(
+    scores = await async_multiple_keyfacts_precision_calculation(
         ground_truth_paths, keyfact_paths, args
     )
     # Print precision scores
-    for i, score in enumerate(precision_scores):
-        print(f"Precision for paper {i + 1}: ", score)
+    for i, score in enumerate(scores):
+        print(f"Precision for paper {i + 1}: ", score["precisions"])
+        print(f"Recall for paper {i + 1}: ", score["recalls"])
 
     # Save precision scores to a file
     output_file = os.path.join(
         "auto_popsci/evaluation/output/dev_5/", "precision_scores.json"
     )
+
+    with open(output_file, "w") as f:
+        json.dump(
+            scores,
+            f,
+            indent=4,
+        )
+    print(f"Precision scores saved to {output_file}")
 
 
 if __name__ == "__main__":

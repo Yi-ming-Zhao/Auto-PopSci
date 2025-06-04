@@ -21,7 +21,7 @@ def read_yaml_file(file_path):
         return yaml.safe_load(file)
 
 
-def get_paper_content(path, mode):
+def get_paper_content(path, mode, dataset_format=None):
     """
     Reads the content of a file and returns it as a string.
 
@@ -36,14 +36,25 @@ def get_paper_content(path, mode):
     import tqdm
 
     if mode == "dataset":
-        with open(path, "r") as file:
-            df = pd.read_parquet(file)
-            # Remove rows with NaN values in the 'paper_url' column
-            df = df.dropna(subset=["paper_content"])
-            # Select specific columns
-            selected_columns = df[["title", "paper_content", "content"]]
-            # Convert to string
-            return selected_columns
+        if dataset_format == "parquet":
+            with open(path, "r") as file:
+                df = pd.read_parquet(file)
+                # Remove rows with NaN values in the 'paper_url' column
+                df = df.dropna(subset=["paper_content"])
+                # Select specific columns
+                selected_columns = df[["title", "paper_content", "content"]]
+                # Convert to string
+                return selected_columns
+
+        elif dataset_format == "json":
+            with open(path, "r") as file:
+                df = pd.read_json(file)
+                # Remove rows with NaN values in the 'paper_url' column
+                df = df.dropna(subset=["paper_content"])
+                # Select specific columns
+                selected_columns = df[["title", "paper_content", "content"]]
+                # Convert to string
+                return selected_columns
     elif mode == "single_paper":
         with open(path, "r") as file:
             return file.read()
@@ -108,10 +119,9 @@ def save_popsci_to_file(popsci, output_dir, output_file_name):
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
     output_file = os.path.join(output_dir, output_file_name)
     with open(output_file, "w") as file:
-        json.dump(popsci, file, indent=4)
+        file.write(popsci)
 
     return output_file
 
@@ -152,8 +162,20 @@ def get_papers_from_dataset(path, dataset_format, is_paperbody_or_news):
                 papers = selected_columns["News_Body"].tolist()
                 titles = selected_columns["News_Title"].tolist()
                 return papers, titles
+            elif is_paperbody_or_news == "All":
+                df = pd.read_json(file)
+                # Remove rows with NaN values in the 'paper_url' column
+                df = df.dropna(subset=["Paper_Body", "News_Body"])
+                # Select specific columns
+                selected_columns = df[["News_Title", "Paper_Body", "News_Body"]]
+                papers = selected_columns["Paper_Body"].tolist()
+                news = selected_columns["News_Body"].tolist()
+                titles = selected_columns["News_Title"].tolist()
+                return papers, titles, news
             else:
-                raise ValueError("Invalid mode. Use 'Paper_Body' or 'News_Body'.")
+                raise ValueError(
+                    "Invalid mode. Use 'Paper_Body' or 'News_Body' or 'All'."
+                )
     elif dataset_format == "parquet":
         raise NotImplementedError("Reading in parquet format is not implemented yet.")
     else:
@@ -234,3 +256,67 @@ async def async_multiple_keyfacts_extraction(args):
         print(f"Key facts for paper {i} saved to {current_keyfacts_path}")
 
     return keyfacts_paths
+
+
+def cal_sari(orig, sys, ref):
+    """
+    Calculate the SARI score between the reference and generated text.
+
+    Args:
+        reference (str): The reference text.
+        generated (str): The generated text.
+
+    Returns:
+        float: The SARI score.
+    """
+    from easse.sari import corpus_sari
+
+    sari = corpus_sari(orig_sents=[orig], sys_sents=[sys], refs_sents=[[ref]])
+    print(f"SARI score: {sari}")
+    return sari
+
+
+def cal_ppl(text):
+    """
+    Calculate the perplexity of the given text using a language model.
+
+    Args:
+        text (str): The text to calculate perplexity for.
+
+    Returns:
+        float: The perplexity score.
+    """
+    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+    import torch
+
+    # 加载预训练模型和分词器
+    model = GPT2LMHeadModel.from_pretrained("gpt2")
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    model.eval()  # 设为评估模式
+
+    inputs = tokenizer(text, return_tensors="pt")  # 返回PyTorch Tensor
+    input_ids = inputs.input_ids  # token id序列，例如 [464, 1234, ...]
+
+    with torch.no_grad():
+        outputs = model(input_ids, labels=input_ids)
+        logits = (
+            outputs.logits
+        )  # 模型输出的未归一化概率（形状：[batch_size, seq_len, vocab_size]）
+
+    # 计算每个token的预测概率
+    shift_logits = logits[..., :-1, :].contiguous()  # 去掉最后一个token的logits
+    shift_labels = input_ids[
+        ..., 1:
+    ].contiguous()  # 去掉第一个token的标签（因为模型预测下一个词）
+
+    # 计算交叉熵损失（等价于负对数似然的平均）
+    loss = torch.nn.functional.cross_entropy(
+        shift_logits.view(-1, shift_logits.size(-1)),
+        shift_labels.view(-1),
+        reduction="none",
+    )
+
+    nll = loss.mean()  # 平均负对数似然
+    ppl = torch.exp(nll).item()
+    print(f"Perplexity: {ppl:.2f}")
+    return ppl
