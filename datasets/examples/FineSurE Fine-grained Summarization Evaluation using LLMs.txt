@@ -1,0 +1,1285 @@
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 906–922
+August 11-16, 2024 ©2024 Association for Computational Linguistics
+FineSurE: Fine-grained Summarization Evaluation using LLMs
+Hwanjun Song1∗, Hang Su2,†, Igor Shalyminov2,†, Jason Cai2,†, Saab Mansour2,†
+1Korea Advanced Institute of Science and Technology
+2AWS AI Labs
+songhwanjun@kaist.ac.kr
+{shawnsu, shalymin, cjinglun, saabm}@amazon.com
+Abstract
+Automated evaluation is crucial for stream-
+lining text summarization benchmarking and
+model development, given the costly and time-
+consuming nature of human evaluation. Tra-
+ditional methods like ROUGE do not cor-
+relate well with human judgment, while re-
+cently proposed LLM-based metrics provide
+only summary-level assessment using Likert-
+scale scores. This limits deeper model anal-
+ysis, e.g., we can only assign one hallucina-
+tion score at the summary level, while at the
+sentence level, we can count sentences con-
+taining hallucinations. To remedy those limi-
+tations, we propose FineSurE, a fine-grained
+evaluator specifically tailored for the sum-
+marization task using large language models
+(LLMs). It also employs completeness and
+conciseness criteria, in addition to faithful-
+ness, enabling multi-dimensional assessment.
+We compare various open-source and propri-
+etary LLMs as backbones for FineSurE. In
+addition, we conduct extensive benchmarking
+of FineSurE against SOTA methods including
+NLI-, QA-, and LLM-based methods, showing
+improved performance especially on the com-
+pleteness and conciseness dimensions. The
+code is available at https://github.com/
+DISL-Lab/FineSurE-ACL24.
+1
+Introduction
+Text summarization stands out as an important task
+in natural language processing, aiming to generate
+a condensed summary of a provided text while re-
+taining its essential information (Gupta and Gupta,
+2019; Song et al., 2023). Despite the enhanced
+quality of summaries produced by LLMs, the de-
+velopment of automated methods for evaluation re-
+mains a challenge (Kry´sci´nski et al., 2020; Maynez
+et al., 2020). Conventional reference-based met-
+rics, such as ROUGE (Lin, 2004), have exhibited a
+∗Corresponding Author.
+†This work conducted independently and is not related to
+the author(s) position at Amazon.
+weak correlation with actual human judgments (Liu
+et al., 2023). Consequently, human evaluation re-
+mains an essential step for accurately assessing the
+quality of generated summaries, even considering
+its inherent costs and time-consuming nature.
+Recently, the need for better automatic evalua-
+tors has become an important research topic, aim-
+ing to streamline evaluation processes and ease
+manual efforts in model development (Gao et al.,
+2023). This effort provides valuable insights into
+whether generated summaries align with predefined
+quality standards, including aspects like faithful-
+ness. Various approaches have been explored, in-
+cluding approaches based on neural language in-
+ference (NLI) (Laban et al., 2022) and question-
+answering (QA) (Fabbri et al., 2022; Zhong et al.,
+2022). In addition, LLMs have recently proven
+their potential to be an automated tool for human-
+like evaluation (Liu et al., 2023; Wang et al., 2023).
+The latest LLM-based method, G-Eval (Liu et al.,
+2023), demonstrated a Spearman correlation coef-
+ficient of over 0.5 with Likert-scale human judg-
+ments on the news domain using GPT-4.
+Despite these advancements, we contend that
+the current LLM-based automated methods still
+fall short in achieving precise evaluation, primarily
+attributed to the coarse-grained evaluation pipeline
+and the ambiguity in evaluation dimensions. Specif-
+ically for coarse-grained evaluation, the evaluation
+dimensions–namely faithfulness, coherence, and
+relevance 1–are frequently assessed at the summary-
+level, resulting in Likert-scale scores for each sum-
+mary (Gao and Wan, 2022; Shen and Wan, 2023;
+Liu et al., 2023; Wang et al., 2023). This Likert-
+scale scoring method lacks fine-grained informa-
+tion on errors in generated summaries. For instance,
+it does not provide a breakdown of the number of
+summary sentences with quality issues or specify
+1We omit fluency assessment as modern AI models typi-
+cally generate highly fluent outputs (Liu et al., 2023).
+906
+
+
+bulgaria might not be the first hotspot that springs to mind for a summer
+holiday 2013 but that could change after it was named europe 's cheapest
+destination yesterday . the former soviet state has gained the most from the
+strong pound , which has cut the cost of visiting the continent . resorts on its
+black sea coast offer the best value in terms of a meal out (…)
+Input Text
+Generated Summary
+[S1] Bulgaria's most popular resort of sunny beach is a carbone copy.
+[S2] It is one of 13 european hotspots out of 14 where your cash will go far 
+further this summer, largely thanks to rock-bottom exchange rates and 
+higher inflation in some countries.
+[S3] Prince Alwaleed Bin Talal has pledged to give pilots a free Bentley.
+[K1] Bulgaria's Black Sea has resorts.
+[K2] Black Sea resorts cheaper than hotspots in Italy.
+[K3] Cheap prices are driven by low exchange rates.
+[K4] (…)
+Keyfact List
+Keyfact
+Alignment
+Keyfacts
+[K1]
+[K2]
+[K3]
+[K4]
+[S1]
+[S2]
+[S3]
+Summary
+Fact 
+Checking
+no error
+out-of-context
+entity error
+Eval. Results
+missing
+Faithfulness:    33%
+Completeness: 75%
+Conciseness:    66%
+Figure 1: FineSurE framework: the given summary is evaluated by conducting the two tasks of fact checking and
+keyfact alignment. In this specific example, the faithfulness score is 33%, since only one out of the three summary
+sentences is factually correct; the completeness score is 75%, since three out of the four keyfacts align with the
+summary; and the conciseness score is 66%, since two out of the three sentences are related to the keyfacts.
+the types of mistakes present in each sentence. Fur-
+thermore, regarding ambiguity, the evaluation of
+coherence and relevance is hindered by the lack of
+clarity in their definition of "the collective quality
+of all sentences" and "the selection of important
+content from the source" (Fabbri et al., 2021; Shen
+et al., 2023). Given that human can encounter chal-
+lenges in evaluating summaries, it is inappropriate
+to expect a neural model to provide accurate and
+objective assessments. Hence, there is a need to
+develop a more precise evaluation framework that
+results in a more detailed assessment with clearly
+defined evaluation dimensions.
+In this paper, we present FineSurE (Fine-
+grained Summarization Evaluation) using LLMs,
+a novel automated approach designed to evaluate
+the summarization quality at a fine-grained level
+based on summary sentences or keyfacts2, as de-
+picted in Figure 1. We aim to evaluate summaries
+using this framework along three vital criteria: the
+faithfulness of minimizing factuality errors, the
+completeness of encompassing the majority of key-
+facts, and the conciseness of avoiding unnecessary
+details. Thus, our framework entails executing two
+finely grained procedures utilizing LLMs: (1) fact
+checking involves identifying specific factuality
+errors present in each summary sentence and (2)
+keyfact alignment focuses on aligning each key-
+fact with all summary sentences from which they
+are inferred. We leverage the outcomes from both
+procedures to calculate precise percentage scores,
+offering a more detailed assessment than Likert-
+scale scoring. This fine-grained approach enables
+us to analyze the quality issues of generated texts
+at both the sentence and keyfact-level.
+2A keyfact refers to a concise sentence conveying a single
+key information, comprising at most 2-3 entities, also referred
+to as a semantic content unit (Bhandari et al., 2020). The
+keyfact list can be generated automatically or by humans.
+On top of keyfact alignment, two dimensions
+(completeness and conciseness) can serve as better
+replacements for coherence and relevance (Fabbri
+et al., 2021), as they evaluate two key aspects of a
+good summary, assessing the comprehensive inclu-
+sion and density of key information while exclud-
+ing irrelevant content.
+To summarize, our main contributions are as fol-
+lows: (1) we argue that LLM-based summarization
+suffers from hallucination, information emission
+and verbosity hence requiring revisiting the evalua-
+tion dimensions, (2) we suggest three metrics tar-
+geting LLM output characteristics and tackling the
+aforementioned problems including faithfulness,
+completeness and conciseness, (3) we propose a
+novel automated evaluation framework - FineSurE,
+based on keyfact lists and using LLMs to generate
+the keyfacts, align them to the summary sentences
+and categorize the errors automatically, (4) we com-
+pare various open-source and proprietary LLMs to
+power FineSurE and analyze their correlation to
+human judgment at the summary and system levels,
+(5) we provide comprehensive results comparing
+our method with similarity-based, NLI-based, QA-
+based, and LLM-based automated methods and
+show improved human correlation for FineSurE
+over state-of-the-art methods.
+2
+Related Work
+Efforts to assess the quality of texts generated by
+language models have led to numerous initiatives
+in designing effective automated evaluators across
+various research directions (Lin, 2004; Fabbri et al.,
+2022; Zhong et al., 2022; Wang et al., 2023).
+Similarity-based Evaluator.
+The evaluation of
+generated text can be measured by the n-gram
+overlap with the reference text, employing met-
+907
+
+
+rics such as ROUGE (Lin, 2004), BLEU (Papineni
+et al., 2002), and METEOR (Banerjee and Lavie,
+2005). In contrast to relying on exact matches,
+several evaluators have leveraged token similarity
+through contextual embeddings like BERTScore
+(Zhang et al., 2019), MoverScore (Zhao et al.,
+2019), and BARTScore (Yuan et al., 2021). How-
+ever, these evaluators lack human correlation and a
+multi-dimensional assessment of text quality akin
+to real human evaluation, as they typically produce
+a single-dimensional score based on text similarity.
+To assess text quality, primarily focusing on
+checking factual consistency, task-specific evalua-
+tors utilizing NLI and QA have been explored.
+NLI-based Evaluator.
+This task involves fact-
+checking and verification by retrieving relevant evi-
+dence from the input text to support the claim made
+in the generated text (Glover et al., 2022; Honovich
+et al., 2022; Utama et al., 2022). DAE (Goyal and
+Durrett, 2020) introduced the dependency arc en-
+tailment formulation, offering a more fine-grained
+approach to faithfulness evaluation. SummaC (La-
+ban et al., 2022) presented a lightweight model that
+facilitates NLI by segmenting input text into sen-
+tence units and aggregating scores between pairs
+of sentences. Despite their enhanced performance,
+they only focus on assessing faithfulness.
+QA-based Evaluator.
+This involves generating
+plausible questions from the reference text and then
+answering these questions considering the gener-
+ated text (Scialom et al., 2021; Chen et al., 2021).
+QAGS (Wang et al., 2020) and QAFactEval (Fabbri
+et al., 2022) enhanced the accuracy of faithfulness
+evaluation, surpassing other similarity- and NLI-
+based evaluators in text summarization. UniEval
+(Zhong et al., 2022) proposed a unified evaluator
+capable of assessing multi-dimensional evaluation
+of text generation through the QA task. In text sum-
+marization, it evaluates four aspects: faithfulness,
+coherence, relevance, and fluency. Generally, these
+methods require training a neural model to generate
+questions and their corresponding answers.
+LLM-based Evaluator.
+With the emergence of
+LLMs, there is a move toward utilizing them as
+reference-free automated evaluators in diverse sce-
+narios (Shi et al., 2023; Lin and Chen, 2023; Chen
+et al., 2023; Fu et al., 2023). Recently, a few ef-
+forts have been made to evaluate faithfulness using
+edited text (Laban et al., 2023), atomic facts (Min
+et al., 2023), and external knowledge base (Feng
+et al., 2023), as well as to assess multi-dimensional
+aspects (Liu et al., 2023; Shen et al., 2023; Wang
+et al., 2023). Although LLMs have shown promise
+as evaluators, they currently lack a fine-grained
+assessment and primarily focus on addressing faith-
+fulness, without considering other important di-
+mensions for high-quality summaries.
+Unlike prior studies, we define crucial aspects
+for a detailed evaluation using LLMs and introduce
+a new fine-grained evaluation framework called
+FineSurE. This framework addresses numerous
+open questions regarding the capabilities of LLMs,
+including sentence-level fact-checking, classifica-
+tion of error types, and keyfact-level alignment.
+3
+FineSurE Framework
+3.1
+Evaluation Dimensions
+LLMs enhance the quality of summarization, but
+they rather suffer from hallucination, information
+emission and verbosity (Ji et al., 2023; Saito et al.,
+2023), requiring revisiting evaluation dimensions.
+Therefore, we advocate for a thorough assessment
+of the two evaluation criteria, "completeness" and
+"conciseness," in addition to "faithfulness." These
+two dimensions can effectively assess both informa-
+tion emission and verbosity while also complement-
+ing each other in evaluating information inclusion
+and summary succinctness.
+• Faithfulness: The summarizer does not manip-
+ulate the information in the input text (i.e.,
+intrinsic) and add any information not directly
+inferable from the input text (i.e., extrinsic).
+• Completeness: The summarizer ensures the in-
+clusion of all keyfacts from the input text in
+the output summary.
+• Conciseness: The summarizer refrains from in-
+corporating information outside the keyfacts
+in the output, maintaining a succinct and fo-
+cused summary.
+Note that, adhering to the precise definition of
+faithfulness in the recent work (Pagnoni et al.,
+2021), we categorize error types into a total of
+seven categories, with "out of context" as an extrin-
+sic error, and "predicate," "entity," "circumstance,"
+"coreference," "discourse link," and "grammatical"
+as intrinsic errors. See examples in Appendix A.
+3.2
+Evaluation Pipeline
+We discuss the evaluation pipeline implementing
+the dimensions discussed previously. We employ
+LLMs as a tool to conduct fact checking and key-
+fact alignment tasks. Specifically, we design two
+908
+
+
+prompts tailored for the two tasks, as shown in
+Figures 3-4 of Appendix B. All prompts are cus-
+tomized to generate outputs in JSON format, en-
+hancing the success ratio of following our instruc-
+tions and facilitating parsing. The detailed analysis
+of the success ratio is provided in Section 4.2.
+Task 1.
+Fact Checking.
+Figure 3 illustrates
+our prompt and its expected JSON output for fact
+checking. We convert the problem of fact checking
+into a categorization problem involving nine cate-
+gories. These include the seven factuality errors,
+along with an additional category "other error" for
+errors outside the seven errors, and an additional
+category "no error" for cases where no error was
+detected. Therefore, given a pair of input text and
+model summary, the LLM is expected to output the
+error type classified into one of the nine categories
+for each sentence along with a concise reason.
+Task 2. Keyfact Alignment.
+Figure 4 shows
+our prompt and its expected JSON output for key-
+fact alignment. We address the alignment problem
+through keyfact matching, a process that involves
+two sequential tasks: verifying if each keyfact is
+inferred from the summary and, if affirmative, spec-
+ifying the line numbers for all the corresponding
+summary sentences. Thus, given a pair of keyfact
+list3 and model summary, the output should be the
+binary label and the list of line numbers of all sum-
+mary sentences matched for each keyfact.
+Parsing and Scoring.
+The evaluation scores are
+computed using the results from the two tasks.
+Given a document D, let S = {s1, . . . sN} be
+the generated summary with N sentences.
+By
+the fact checking task, we identify a subset of
+Sfact ⊆S, which consists solely of summary sen-
+tences marked "no error". Then, the percentage
+score of faithfulness on S is determined by:
+Faithfulness(D, S) = |Sfact|/|S|.
+(1)
+Let K = {k1, . . . , kM} be the list of keyfacts
+with a size of M. Through the keyfact alignment,
+we construct a bipartite graph M = (K, S, E),
+where the edge set E = {(k, s) : k →s | k ∈
+K ∧s ∈S} and k →s indicates that the keyfact
+k aligns with the summary sentence s. Then, the
+percentage scores of completeness and conciseness
+on S are computed at the summary level by:
+Completeness(K, S)=
+{k|(k, s)∈E}
+/|K|
+Conciseness(K, S)=
+{s|(k, s)∈E}
+/|S|, (2)
+where the operator |·| returns the number of unique
+items within the provided set. Intuitively, the two
+scores represent completeness, indicating the de-
+gree to which keyfacts are included in the summary,
+and conciseness, reflecting the density of relevant
+sentences aligning with given keyfacts. Moreover,
+unlike existing LLM-based methods (Liu et al.,
+2023; Wang et al., 2023; Shen et al., 2023), we pro-
+vide more detailed information about the error type
+associated with each sentence and the alignment of
+each keyfact with summary sentences.
+3.3
+Prompt Engineering
+We explore various prompt engineering strate-
+gies (Wei et al., 2022; Yu et al., 2023) to identify
+the most suitable one for our evaluation pipeline:
+• Basic Prompt: A default question prompt in
+plain text, e.g., is the summary sentence sup-
+ported by the transcript?
+• Instruction: The prompt is provided using a
+step-by-step instruction using "Instruction:".
+• Categorization: The prompt solves a catego-
+rization task by providing target categories.
+• Reasoning: The prompt uses a chain-of-thought
+approach, incorporating a reasoning step.
+• Evidence Mapping: The prompt requests an
+exact quote from the input to confirm the de-
+cision made by LLMs.
+Combining all the above techniques was not
+always superior. Evaluation prompts are recom-
+mended to use instruction format with categoriza-
+tion and reasoning for faithfulness evaluation, as
+in Figure 3, and only instruction format for com-
+pleteness and conciseness evaluation, as in Figure
+4. See the detailed ablation in Appendix G.
+3.4
+Keyfact Extraction
+The list of keyfacts is essential for evaluating the
+completeness and conciseness using FineSurE. Hu-
+mans are best suited to generate these keyfacts
+as they understand the priorities in different do-
+mains, such as medicine or sales. However, in
+some cases, obtaining human keyfacts can be chal-
+lenging. FineSurE works with human keyfacts by
+default, but for cases where no human keyfacts
+are provided, it can employ the LLM to extract
+keyfacts automatically. This process is entirely
+automated, utilizing prompts tailored for keyfact
+3The list of keyfacts is provided by humans; if unavailable,
+it can be automatically derived from the reference summary.
+See Appendix C for details.
+909
+
+
+Direction
+Method
+Sentence-level
+Summary-level
+System-level
+bAcc (↑)
+Pearson Corr (↑)
+Spearman Corr (↑)
+Rank Corr (↑)
+Similarity-
+based
+ROUGE-1
+Not Available
+0.324 (0.00)
+0.332 (0.00)
+0.883 (0.00)
+ROUGE-2
+Not Available
+0.384 (0.00)
+0.315 (0.00)
+0.947 (0.00)
+ROUGE-L
+Not Available
+0.175 (0.00)
+0.180 (0.00)
+0.667 (0.05)
+BERTScore
+Not Available
+0.008 (0.69)
+0.000 (0.97)
+-0.133 (0.73)
+BARTScore
+Not Available
+0.717 (0.00)
+0.736 (0.00)
+0.937 (0.00)
+NLI-based
+SummaC-Conv
+Not Available
+0.828 (0.00)
+0.814 (0.00)
+0.883 (0.00)
+QA-based
+UniEval
+Not Available
+0.743 (0.00)
+0.772 (0.00)
+0.983 (0.00)
+QAFactEval
+Not Available
+0.841 (0.00)
+0.813 (0.00)
+0.933 (0.00)
+LLM-based
+G-Eval (GPT-4)
+Not Available
+0.841 (0.00)
+0.834 (0.00)
+0.950 (0.00)
+FineSurE (GPT-4)
+86.4%
+0.833 (0.00)
+0.839 (0.00)
+0.950 (0.00)
+Table 1: Performance of faithfulness evaluation on FRANK using ten automated metrics at the sentence-, summary-
+and system-level. The values in parenthesis represent p-values. The best results are marked in bold.
+extraction (see Figure 5). For further details, refer
+to Appendix C. The impact of employing auto-
+matic keyfact extraction on keyfact alignment is
+discussed in Section 4.1.2.
+4
+Evaluation
+Datasets
+To evaluate the automated evaluator’s
+performance, we need datasets with human anno-
+tations for sentence-level faithfulness and keyfact-
+level alignment. Since no single dataset includes
+both types of annotations, we opt for two sepa-
+rate datasets. FRANK (Pagnoni et al., 2021) is
+a benchmark dataset of 2, 246 summaries for fac-
+tuality evaluation metrics. It encompasses sum-
+maries of nine summarization systems on CN-
+NDM (Hermann et al., 2015) and XSUM (Narayan
+et al., 2018), providing fine-grained annotations
+of sentence-level factuality error types. On the
+other hand, REALSumm (Bhandari et al., 2020) is
+another dataset of 2, 500 summaries from 25 sum-
+marization systems for automated metrics based
+on CNNDM. It includes a list of human keyfacts,
+along with corresponding annotations indicating
+their presence in the summary. FRANK and REAL-
+Summ obtain the inter-annotator agreement (IAA)
+scores of 0.58 (cohen’s kappa) and 0.66 (Krippen-
+dorff’s alpha) for three annotators, respectively.
+LLMs as Evaluators
+We use the GPT-4-turbo
+(gpt-4-1106-preview) (Achiam et al., 2023) by
+default in main evaluation, but test with vari-
+ous open-source and proprietary LLMs, including
+Mixtral-8x7B (Jiang et al., 2024), Phi-2, Llama-2/-
+3 (Touvron et al., 2023), GPT-3.5-turbo, and GPT-
+4-omni (gpt-4o-2024-05-13), in Section 4.2. We set
+the temperature to 0 and clear the history for every
+evaluation instance, following the literature (Shen
+et al., 2023). We use HuggingFace models for
+open-source LLMs and paid APIs for proprietary
+LLMs.
+Baselines
+We compare FineSurE with five
+similarity-based methods, ROUGE-1/-2/-L (Lin,
+2004), BERTScore (Zhang et al., 2019), and
+BARTScore (Yuan et al., 2021); a NLI-based
+method, SummaC-Conv (Laban et al., 2022); two
+QA-based methods, UniEval (Zhong et al., 2022)
+and QAFactEval (Fabbri et al., 2022); and the lat-
+est LLM-based method, G-Eval (Liu et al., 2023).
+Note that QAFactEval and SummaC-Conv are only
+compared for faithfulness evaluation, as they are
+limited to factuality. We obtain all the results by
+executing each metric in our experimental setup.
+Performance
+Each automated evaluator’s perfor-
+mance is assessed by comparing estimated scores
+with ground-truth human judgments using sentence,
+summary, and system-level measurements. This
+multi-level analysis is crucial, as we seek to un-
+derstand the agreement of the evaluator on each
+sentence, each summary, and the average perfor-
+mance of each summarization system.
+Balanced accuracy (bAcc) assesses faithfulness
+in classifying each summary sentence for the pres-
+ence or absence of factual errors at the sentence-
+level. This is the average of true positive and true
+negative rates widely used when the two classes
+are imbalanced (Brodersen et al., 2010). Pearson
+and Spearman correlations assess all three dimen-
+sions at the summary-level by comparing percent-
+age scores in Eqs. (1)-(2) derived from predicted
+and human evaluation results. Lastly, rank cor-
+relation is a system-level measure assessing the
+alignment of performance rankings across summa-
+rization systems (models) calculated by both our
+evaluator and humans. The details of the measure-
+ments are provided in Appendix D.
+910
+
+
+Error Category
+OutE
+EntE
+PredE
+CirE
+GramE
+LinkE
+CorefE
+Mean
+Random Guessing
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+Bart-Large (Fine-tuned)
+56.7%
+36.9%
+14.8%
+34.0%
+21.4%
+0.0%
+40.0%
+29.1%
+FineSurE (GPT-4)
+50.2%
+63.7%
+41.9%
+38.1%
+44.6%
+19.4%
+37.8%
+42.2%
+Table 2: Accuracy analysis of factuality error localization in assessing faithfulness, with error categories including
+OutE (out-of-context), EntE (entity error), PredE (predicate error), CirE (circumstance error), GramE (grammatical
+error), LinkE (discourse link error), and CorefE (coreference error). "Random Guessing" is the performance of
+randomly selecting from the seven categories, i.e., 1/7=14.3%, while "Bart-Large" is a stronger baseline model
+fine-tuned on FRANK for error localization.
+Dimension
+(a) Completeness
+(b) Conciseness
+Direction
+Method
+Summary-level
+System-level
+Summary-level
+System-level
+Pearson (↑)
+Spearman (↑)
+Rank (↑)
+Pearson (↑)
+Spearman (↑)
+Rank (↑)
+Similarity-
+based
+ROUGE-1
+0.484 (0.00)
+0.461 (0.00)
+0.516 (0.01)
+0.387 (0.00)
+0.371 (0.00)
+0.332 (0.10)
+ROUGE-2
+0.456 (0.00)
+0.461 (0.00)
+0.463 (0.02)
+0.328 (0.00)
+0.337 (0.00)
+0.290 (0.16)
+ROUGE-L
+0.425 (0.00)
+0.428 (0.00)
+0.238 (0.25)
+0.310 (0.00)
+0.321 (0.00)
+0.083 (0.69)
+BERTScore
+0.455 (0.00)
+0.443 (0.00)
+0.619 (0.00)
+0.416 (0.00)
+0.405 (0.00)
+0.783 (0.00)
+BARTScore
+0.216 (0.00)
+0.199 (0.00)
+0.653 (0.00)
+0.241 (0.00)
+0.210 (0.00)
+0.824 (0.00)
+QA-based
+UniEval
+0.134 (0.00)
+0.180 (0.00)
+0.346 (0.09)
+0.086 (0.00)
+0.128 (0.00)
+-0.176 (0.39)
+LLM-based
+G-Eval (GPT4)
+0.314 (0.00)
+0.295 (0.00)
+0.908 (0.00)
+0.314 (0.00)
+0.277 (0.00)
+0.582 (0.00)
+FineSurE (GPT-4)
+0.688 (0.00)
+0.677 (0.00)
+0.949 (0.00)
+0.505 (0.00)
+0.451 (0.00)
+0.880 (0.00)
+FineSurE†(GPT-4)
+0.571 (0.00)
+0.546 (0.00)
+0.905 (0.00)
+0.438 (0.00)
+0.399 (0.00)
+0.911 (0.00)
+Table 3: Performance of completeness and conciseness evaluation on REALSumm using ten automated evaluation
+metrics at the summary- and system-level. The values in parenthesis represent p-values. Fine-Eval† utilizes the list
+of keyfacts automatically derived through LLMs, in contrast to relying on human keyfacts.
+Method
+Faithfulness
+Completeness
+Conciseness
+G-Eval
+0.906
+0.799
+0.759
+FineSurE
+0.921
+0.853
+0.908
+Table 4: Inter-annotator agreement score (IAA) of
+GEval and FineSurE across three distinct evaluations.
+4.1
+Main Results: Evaluators Comparison
+4.1.1
+Faithfulness
+Table 1 summarizes the agreement between auto-
+mated evaluators and human scores in faithfulness
+evaluation at three different granularities. FineSurE
+significantly outperforms similarity-, NLI-, and
+QA-based evaluators at all levels of evaluation.
+It is important to note that none of the existing
+methods provide sentence-level evaluation results,
+relying instead on summary-level scoring, such as
+Likert-scale scores. It is noteworthy that FineSurE
+has the capability to assess whether each sentence
+contains a factual error or not, demonstrating re-
+markable alignment with human sentence-level
+judgments, with a balanced accuracy of 86.4%.
+Given the strong alignment with human judg-
+ment, using LLMs as an evaluator holds great
+promise for enhancing the reliability of evaluation
+3The pre-trained Bart-Large (Lewis et al., 2020) is fine-
+tuned on error localization data constructed using FRANK,
+comprising 3,885 training and 1,007 testing sentences, each
+paired with their corresponding human error categories.
+processes for text summarization. However, one
+open question remains: Can LLMs identify the type
+of factuality error?
+Table 2 unveils the capability of LLMs for fac-
+tuality error localization, demonstrating accuracy
+as the probability that the predicted error cate-
+gory matches the correct answer given by humans.
+FineSurE outperforms the strong baseline, Bart-
+Large3 fine-tuned on FRANK for error localization,
+despite not being trained on any error localization
+data, i.e., zero-shot prediction. Its superiority is
+primarily stemming from error categories that are
+uncommon in the training set for Bart-Large, such
+as PredE (141 cases), CirE (142 cases), and LinkE
+(41 cases). Nevertheless, LLMs still make numer-
+ous mistakes in accurately identifying the exact
+error type, despite their excellent performance in
+the binary decision of hallucination.
+Therefore, achieving a level of evaluation com-
+parable to human performance in more intricate
+assessment tasks remains a challenging objective.
+4.1.2
+Completeness and Conciseness
+The agreement between automated evaluators and
+human scores on completeness and conciseness is
+summarized in Table 3. In contrast to similarity-
+based evaluators, which provide a single compos-
+ite score, UniEval and G-Eval yield four distinct
+911
+
+
+Type
+LLM
+Sentence-level
+Summary-level
+System-level
+Success
+bAcc (↑)
+Pearson Corr (↑)
+Spearman Corr (↑)
+Rank Corr (↑)
+Ratio
+Open-source
+Phi-2 (2.7B)
+48.1%
+-0.108 (0.00)
+-0.010 (0.73)
+-0.700 (0.04)
+50.4%
+Llama2-70B
+56.5%
+0.133 (0.00)
+0.147 (0.00)
+0.833 (0.01)
+86.2%
+Mixtral-8x7B
+50.7%
+-0.023 (0.38)
+0.036 (0.18)
+-0.450 (0.22)
+63.1%
+Mixtral-8x7B-Inst.
+78.7%
+0.708 (0.00)
+0.716 (0.00)
+0.883 (0.00)
+88.9%
+Llama3-70B-Inst.
+92.0%
+0.844 (0.00)
+0.841 (0.00)
+0.933 (0.01)
+98.3%
+Proprietary
+Gemini-1-pro
+87.7%
+0.733 (0.00)
+0.736 (0.00)
+0.916 (0.00)
+98.0%
+GPT-3.5-turbo
+78.8%
+0.709 (0.00)
+0.709 (0.00)
+0.933 (0.00)
+93.1%
+GPT-4-turbo
+86.4%
+0.833 (0.00)
+0.839 (0.00)
+0.950 (0.00)
+98.1%
+GPT-4-omni
+91.8%
+0.855 (0.00)
+0.852 (0.00)
+0.883 (0.00)
+98.1%
+Table 5: Performance of faithfulness evaluation using five open-source and four proprietary LLMs. The rightmost
+column is the success ratio of accurately following the prompt.
+scores, evaluating faithfulness, coherence, rele-
+vance, and fluency. We use their coherence and
+relevance scores to calculate the correlation with
+human scores for completeness and conciseness,
+as they indicate the inclusion and density of key
+information, respectively.
+Overall, FineSurE using human keyfacts demon-
+strates a very high agreement with human evalua-
+tions for completeness and conciseness, surpassing
+other evaluators significantly. This is because key-
+fact alignment is essential to verify the coverage
+of crucial information in the summary, a task that
+cannot be accomplished with existing LLM-based
+method like G-Eval. See the qualitative example
+in Appendix E. We also assess the performance of
+FineSurE without employing human keyfacts and,
+instead, utilizing machine-generated keyfacts, as
+outlined in Appendix C. The keyfacts are extracted
+using GPT-4 with a specific prompt. It is notewor-
+thy that, even with machine-generated key facts,
+FineSurE maintains a higher level of agreement
+over other automated evaluators.
+With an advantage as a fine-grained evaluator,
+FineSurE also provides evaluation results at the
+keyfact-level, revealing which keyfacts are omitted
+in the summary, i.e., keyfact matching. Given a
+list of keyfacts, it includes binary labels ("Yes" or
+"No") in the JSON output, as illustrated in Figure
+4. Therefore, we assess the agreement for the key-
+fact matching task by calculating the IAA score
+between machine and human labels. FineSurE
+demonstrates a Krippendorff’s alpha of 0.65 for
+keyfact matching. This robust agreement at various
+levels corroborates that FineSurE has a potential to
+be an effective fine-grained automatic evaluator.
+Furthermore, in Appendix F, we compare
+FineSurE with two variants of G-Eval, which are
+tailored for completeness and conciseness evalua-
+tion by modifying its prompts to be more suitable
+for such assessment and integrating them for use
+with keyfacts. FineSurE maintains its significant
+dominance even with additional tuning on G-Eval.
+4.1.3
+Stability in Evaluation Results
+Concerns arise about evaluation result stability with
+LLMs due to their inherent text generation ran-
+domness, even at temperature 0. Despite LLM-
+based methods relying on Likert-scale evaluation,
+such as G-Eval, showing significant fluctuations in
+judgment alignment (Shen et al., 2023; Liu et al.,
+2023), Table 4 demonstrates that FineSurE (GPT-
+4) maintains much higher agreement in summary-
+level evaluation scores across three distinct runs.
+This underscores the benefit of employing fine-
+grained percentage scores derived from sentence-
+and keyfact-level assessments.
+4.2
+LLMs as Evaluators Comparison
+It is interesting to observe how the evaluation agree-
+ment varies based on the choice of LLMs, given the
+abundance of open-source and proprietary LLMs.
+Success Ratio.
+The primary limitation of open-
+source LLMs is their comparatively lower success
+ratio in following prompts, compared to proprietary
+LLMs; only Llama3-70B-Inst exhibits a high suc-
+cess ratio comparable to proprietary LLMs. Upon
+analyzing failure cases, the top three reasons are:
+(1) the output is either not in JSON format or an
+incorrect JSON format, (2) the output consists of
+meaningless text, e.g., python codes or no output
+at all, and (3) the JSON output includes only a few
+lines of sentences or keyfacts.
+Furthermore, the maximum token length in con-
+text for open-source LLMs is notably shorter com-
+pared to proprietary LLMs.
+GPT-4 series can
+process up to 128K tokens, whereas open-source
+LLMs generally handle up to 8K input tokens. This
+results in prompt truncation when handling lengthy
+912
+
+
+Dimension
+(a) Completeness
+(b) Conciseness
+Type
+Method
+Summary-level
+System-level
+Summary-level
+System-level
+Succ.
+Pearson (↑)
+Spearman (↑)
+Rank (↑)
+Pearson (↑)
+Spearman (↑)
+Rank (↑)
+Ratio
+Open-source
+Phi-2 (2.7B)
+0.093 (0.00)
+0.104 (0.00)
+0.338 (0.10)
+0.058 (0.04)
+0.069 (0.01) -0.039 (0.85)
+52.1%
+Llama2-70B
+0.421 (0.00)
+0.401 (0.00)
+0.824 (0.00)
+0.387 (0.00)
+0.371 (0.00)
+0.612 (0.00)
+53.7%
+Mixtral-8x7B
+0.166 (0.00)
+0.152 (0.00)
+0.431 (0.03)
+0.087 (0.00)
+0.108 (0.00)
+0.264 (0.20)
+53.8%
+Mixtral-8x7B-Inst.
+0.439 (0.00)
+0.437 (0.00)
+0.678 (0.00)
+0.367 (0.00)
+0.361 (0.00)
+0.798 (0.00)
+87.5%
+Llama3-70B-Inst.
+0.755 (0.00)
+0.747 (0.00)
+0.881 (0.00)
+0.445 (0.00)
+0.444 (0.00)
+0.786 (0.00)
+92.0%
+Proprietary
+Gemini-1-pro
+0.583 (0.00)
+0.567 (0.00)
+0.820 (0.00)
+0.435 (0.00)
+0.402 (0.00)
+0.745 (0.00)
+99.7%
+GPT-3.5-turbo
+0.509 (0.00)
+0.493 (0.00)
+0.848 (0.00)
+0.381 (0.00)
+0.372 (0.00)
+0.706 (0.00)
+74.5%
+GPT-4-turbo
+0.688 (0.00)
+0.677 (0.00)
+0.949 (0.00)
+0.505 (0.00)
+0.451 (0.00)
+0.880 (0.00)
+99.8%
+GPT-4-omni
+0.691 (0.00)
+0.686 (0.00)
+0.943 (0.00)
+0.522 (0.00)
+0.467 (0.00)
+0.932 (0.00)
+99.6%
+Table 6: Performance of completeness and conciseness evaluation using five open-source and four proprietary
+LLMs. The rightmost column is the success ratio of accurately following the prompt.
+Type
+LLM
+Factuality Error Type
+Models
+OutE
+EntE
+PredE
+CirE
+GramE
+LinkE
+CorefE
+Mean
+Baseline (Random Guessing)
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+14.3%
+Open-source
+Phi-2
+8.1%
+12.6%
+4.5%
+5.8%
+6.9%
+8.3%
+6.8%
+7.6%
+Llama2-70B
+21.6%
+31.4%
+13.4%
+14.3%
+19.0%
+11.1%
+25.0%
+19.4%
+Mixtral-8x7b
+21.8%
+24.1%
+16.0%
+6.7%
+15.6%
+7.1%
+5.6%
+13.8%
+Mixtral-8x7b-Inst.
+37.8%
+45.4%
+26.1%
+12.5%
+22.2%
+25.0%
+22.7%
+27.4%
+Llama3-70B-Inst.
+66.1%
+64.8%
+41.1%
+38.1%
+54.5%
+43.8%
+37.5%
+49.4%
+Proprietary
+Gemini-1-pro
+51.9%
+36.0%
+23.2%
+18.2%
+3.8%
+0.0%
+25.0%
+22.6%
+GPT-3.5-turbo
+52.4%
+42.4%
+26.4%
+25.9%
+52.4%
+0.0%
+12.9%
+30.3%
+GPT-4-turbo
+50.2%
+63.7%
+41.9%
+38.1%
+44.6%
+19.4%
+37.8%
+42.2%
+GPT-4-omni
+70.6%
+69.2%
+45.7%
+46.6%
+50.0%
+42.3%
+44.0%
+52.6%
+Table 7: Accuracy analysis of factuality error localization in assessing faithfulness using five open-source and
+four proprietary LLMs, where "Baseline" is the performance of random guessing. Top-1 values are marked in bold.
+input texts, potentially leading to failures in gener-
+ating accurate outputs in text summarization.
+Agreement with Human Score.
+Tables 5-6 sum-
+marize the correlation of nine different LLMs with
+human judgment, computed only for the success-
+ful cases of adhering to the prompt. Although the
+recent Llama3-70B-Inst shows strong agreement
+with humans, in general, there is a noticeable gap
+between open-source and proprietary LLMs. Re-
+garding open-source LLMs, the agreement with
+human scores increases with the model size; for
+example, Llama2-70B exhibits a higher correlation
+coefficient than Phi-2. Additionally, instruction tun-
+ing also plays a role, as observed in Mixtral-8x7b’s
+performance, which improved significantly after
+instruction tuning. In contrast, all the proprietary
+LLMs exhibit high correlation coefficient. Partic-
+ularly, more recent and powerful LLMs exhibit
+better performance, i.e., GPT-4-turbo > GPT-3.5-
+turbo, GPT-4-omni > GPT-4-turbo.
+It’s notable that LLMs with a high success ratio
+exhibit a strong correlation, suggesting they are not
+penalized by their high success ratios. Therefore,
+a more advanced LLM simultaneously achieves
+higher agreement and success ratios.
+Error Localization
+We provide a detailed fac-
+tuality error localization analysis using different
+LLMs in Table 7. GPT-4-omni improves the mean
+accuracy in error localization by 10% over GPT-
+4-turbo. The categorization accuracies of open-
+source LLMs are considerably lower than those of
+proprietary LLMs in general. However, the latest
+open-source LLM, Llama3-70B-Inst, outperforms
+GPT-4-turbo in error localization, achieving an av-
+erage prediction accuracy of 49.4%, which is 7.2%
+higher than that of GPT-4-turbo. Additionally, in-
+struction tuning demonstrates a significant accuracy
+boost in this task, as evidenced by the improvement
+from Mixtral-8x7b to Mixtral-8x7b-Inst.
+4.3
+Evaluation using FineSurE
+As an actual application of an automated eval-
+uator, we gather summaries generated by four
+open-source and four proprietary LLMs, and sub-
+sequently assess their summarization quality us-
+ing the FineSurE algorithm (see the prompt for
+summarization we used in Appendix H). Figure 2
+shows the percentage scores of the eight LLMs for
+faithfulness, completeness, and conciseness. The
+summaries are generated for 100 examples sourced
+from CNNDM, all of which are also included in
+913
+
+
+Percentage (%)
+52.8%
+67.0%
+79.2% 85.5% 87.0% 89.8% 88.3%
+26.5% 18.9%
+53.6% 55.3% 59.2% 56.4% 63.9%
+46.0%
+33.5%
+54.0%
+66.9% 57.6% 56.1% 60.6%
+Faithfulness
+Completeness
+Conciseness
+0%
+25%
+50%
+75%
+100%
+Phi-2
+Mixtral-8x7b
+Mixtral-8x7b-Inst.
+Llama3-70b-Inst.
+Gemini-1-pro
+GPT-3.5-turbo
+GPT-4-turbo
+GPT-4-omni
+82.7%
+50.6%
+72.7%
+Figure 2: Evaluation using FineSurE for eight LLMs in text summarization on CNNDM.
+REALSumm, thereby possessing the list of key-
+facts extracted by human annotators.
+In general, proprietary LLMs, including differ-
+ent versions of GPT, generate high-quality sum-
+maries in comparison to open-source counterparts.
+Interestingly, GPT-4-omni exhibits the highest
+agreement with humans as an automated evaluator
+in Tables 5-6, but its faithfulness and completeness
+scores are significantly worse even than GPT-3.5-
+turbo. Consequently, GPT-4-omni is likely to in-
+clude more hallucinations and miss many important
+keyfacts in summary generation.
+The performance ranking of each model changes
+significantly for each evaluation dimension. GPT-
+3.5-turbo, GPT-4-turbo, and GPT-4-omni are the
+best for faithfulness, completeness, and concise-
+ness, respectively.
+Nevertheless, it is notewor-
+thy that Llama3-70B-Inst, an open-source LLM,
+exhibits comparable performance to the state-of-
+the-art proprietary LLMs. In open-source LLMs,
+instruction tuning significantly enhances summa-
+rization quality, as evidenced by the performance
+increase of Mixtral-8x7b-Inst over Mixtral-8x7b.
+These findings align with prior observations re-
+ported in recent studies on faithfulness (Laban et al.,
+2023) and instruction tuning (Zhang et al., 2023).
+Lastly, while there is no doubt that faithfulness is
+crucial, achieving both completeness and concise-
+ness simultaneously turns out to be very important
+and challenging in text summarization, as evident
+from the low percentage scores even with GPT-4
+series. Therefore, it emphasizes the need to put
+more effort into these aspects for a good summary.
+5
+Conclusion
+We introduce FineSurE, a novel automated evalua-
+tor designed for fine-grained and multi-dimensional
+text summarization evaluation. The evaluation pro-
+cess is broken down into fact checking and keyfact
+alignment, providing detailed insights, where key-
+facts can be either provided by humans or gener-
+ated by LLMs. Our experiments include a thorough
+comparison with existing evaluators, exploration
+of performance using eight opensource or propri-
+etary LLMs, and real quality assessment of recent
+LLM-generated summaries. The results indicate
+the potential effectiveness of FineSurE as a text
+summarization evaluator, showcasing its promising
+capabilities in advancing automated evaluation for
+text summarization.
+Limitations
+Our automated evaluator is primarily tested on
+the news domain due to the limited availability
+of benchmark datasets with fine-grained human an-
+notations. We emphasize the critical importance of
+constructing a high-quality benchmark dataset with
+high diversity in input domains, length, and types.
+Also, the prompts for evaluation may need to be
+tuned if a different summary is expected like the
+summary from the medical domain. Lastly, other
+aspects can be considered for text summarization,
+such as toxicity and social bias. We leave these
+challenges as future work.
+Ethics Statement
+This paper focuses on designing an automatic eval-
+uator using LLMs for text summarization. There-
+fore, we do not anticipate any negative ethical and
+social impact.

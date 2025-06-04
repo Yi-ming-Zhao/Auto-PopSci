@@ -1,8 +1,10 @@
-from utils.utils import (
+from ..utils.utils import (
     read_yaml_file,
     get_paper_titles,
     get_paper_content,
     save_key_facts_to_file,
+    save_popsci_to_file,
+    get_papers_from_dataset,
 )
 import asyncio
 from prompts.prompt_template import prompt
@@ -82,7 +84,7 @@ async def generate_popsci_from_keyfacts(args, key_facts, paper_title, paper):
     """
     start_time = time.time()
     print(f"Generating popsci from the key facts: {paper_title}")
-    auth_info = read_yaml_file("auth.yaml")
+    auth_info = read_yaml_file("auto_popsci/auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
@@ -121,25 +123,35 @@ async def async_multiple_popsci_generation_from_keyfact(args, key_fact_paths):
     """
     # get popsci from the key facts
     papers = []
-    paper_titles = []
+    news = []
+    titles = []
     if args.paper_mode == "dataset":
-        raise NotImplementedError("Reading in dataset mode is not implemented yet.")
+        papers, titles, news = get_papers_from_dataset(
+            args.paper_path, args.dataset_format, args.is_paperbody_or_news
+        )
+        print(f"Number of papers: {len(papers)}")
+        print(f"Number of titles: {len(titles)}")
+        print(f"Number of news: {len(news)}")
     elif args.paper_mode == "single_paper":
         body = get_paper_content(args.paper_path, args.paper_mode)
         papers.append(body)
         title = get_paper_titles(args.paper_path, args.paper_mode)
-        paper_titles.append(title)
+        titles.append(title)
     else:
         raise ValueError("Invalid mode. Use 'dataset' or 'single_paper'.")
 
-    for i, paper in enumerate(papers):
-        key_fact_path = key_fact_paths[i]
-        with open(key_fact_path, "r") as file:
-            key_facts = json.load(file)
-        paper_title = paper_titles[i]
-        popsci = await generate_popsci_from_keyfacts(
-            args, key_facts, paper_title, paper
+    tasks = []
+    for i, key_fact_path in enumerate(key_fact_paths):
+        with open(key_fact_path, "r") as f:
+            key_facts = json.load(f)
+        paper_title = titles[i]
+        paper = papers[i]
+        task = generate_popsci_from_keyfacts(args, key_facts, paper_title, paper)
+        tasks.append(task)
+
+    popsci_results = await asyncio.gather(*tasks)
+    for i, popsci in enumerate(popsci_results):
+        save_popsci_to_file(
+            popsci, args.popsci_output_dir, f"{titles[i]}_popsci_from_keyfacts.txt"
         )
-        save_key_facts_to_file(
-            popsci, args.popsci_output_dir, f"{paper_title}_popsci.json"
-        )
+        print(f"Popsci for paper {i} saved to {args.popsci_output_dir}")
