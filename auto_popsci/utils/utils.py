@@ -320,3 +320,48 @@ def cal_ppl(text):
     ppl = torch.exp(nll).item()
     print(f"Perplexity: {ppl:.2f}")
     return ppl
+
+
+async def get_llm_response(args, prompt_text):
+    """
+    Get the response from the LLM for the given prompt.
+    Get single response, with asynchronous OpenAI client.
+    Args:
+        args (argparse.Namespace): The command line arguments.
+        prompt_text (str): The prompt text to send to the LLM.
+    Returns:
+        str: The response from the LLM.
+    """
+    start_time = time.time()
+    print(f"Getting LLM response...")
+    auth_info = read_yaml_file("auto_popsci/auth.yaml")
+    current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
+    current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
+    current_model = auth_info[args.llm_type][args.model_type]["model"]
+    client = AsyncOpenAI(
+        api_key=current_api_key,
+        base_url=current_base_url,
+    )
+
+    try:
+        response = await client.chat.completions.create(
+            model=current_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt_text,
+                }
+            ],
+        )
+    except Exception as e:
+        print(f"Error: {e}")
+        return "API connection Error: " + str(e)
+
+    if response and response.choices:
+        result = response.choices[0].message.content
+        print(f"Successfully get LLM response: {result}")
+        end_time = time.time()
+        print(f"Getting LLM response took {end_time - start_time:.2f} seconds.")
+        return result
+    else:
+        return "No LLM response."

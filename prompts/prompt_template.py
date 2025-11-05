@@ -60,4 +60,5 @@ prompt = {
     The generated key facts are as follows:
     {generated_key_facts}
     """,
+    ""
 }
