@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 # 配置参数
 MERGED_DATA_PATH = "datasets/our_dataset/merged_popular_science_articles.json"
 OUTPUT_PATH = "datasets/our_dataset/merged_popular_science_articles_with_wikipedia.json"
-SAMPLE_SIZE = 5  # 测试用，先处理5篇。设为None表示处理全部
+SAMPLE_SIZE = None  # None表示处理全部文章
 
 # GLM-4 API配置 (使用模型 glm-4-air-250414)
 GLM_API_KEY = "3a65782d25f640e1992485321d0fe76e.gTqRhVSVcVS5PbAK"
@@ -28,7 +28,7 @@ class WikipediaExtractor:
         self.api_url = GLM_API_URL
 
     async def extract_wikipedia_keyword_glm(
-        self, session: aiohttp.ClientSession, title: str, content: str
+        self, session: aiohttp.ClientSession, title: str, content: str, max_retries: int = 3
     ) -> str:
         """使用GLM-4 (glm-4-air-250414) 从标题和内容中提取Wikipedia搜索关键词"""
 
@@ -48,41 +48,87 @@ class WikipediaExtractor:
 
 Wikipedia搜索关键词："""
 
+        # 添加重试逻辑
+        result = None
+        for attempt in range(max_retries):
+            try:
+                # 调用GLM-4 API (使用模型 glm-4-air-250414)
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+
+                payload = {
+                    "model": "glm-4-air-250414",
+                    "messages": [
+                        {"role": "system", "content": "你是一个专业的关键词提取专家。"},
+                        {"role": "user", "content": prompt_text},
+                    ],
+                    "max_tokens": 50,
+                    "temperature": 0.3,
+                }
+
+                print(f"  正在调用GLM-4 (glm-4-air-250414) 提取关键词...")
+
+                async with session.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 429:
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt  # 指数退避
+                            print(f"  GLM API请求频率限制，{wait_time}秒后重试...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"  GLM API请求频率限制，已达最大重试次数")
+                            return None
+                    elif response.status != 200:
+                        error_text = await response.text()
+                        if attempt < max_retries - 1:
+                            print(f"  GLM API响应错误: {response.status}，重试中...")
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            print(f"  GLM API响应错误: {response.status}，已达最大重试次数")
+                            return None
+
+                    result = await response.json()
+                    break  # 成功获取响应，跳出重试循环
+                    
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    print(f"  GLM API请求超时，重试中...")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    print(f"  GLM API请求超时，已达最大重试次数")
+                    return None
+            except aiohttp.ClientError as e:
+                if attempt < max_retries - 1:
+                    print(f"  GLM API网络请求失败: {e}，重试中...")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    print(f"  GLM API网络请求失败: {e}，已达最大重试次数")
+                    return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"  提取关键词时出现错误: {e}，重试中...")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    print(f"  提取关键词时出现未知错误: {e}，已达最大重试次数")
+                    return None
+        
+        # 如果所有重试都失败了
+        if result is None:
+            return None
+
+        # 处理API响应
         try:
-            # 调用GLM-4 API (使用模型 glm-4-air-250414)
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
-
-            payload = {
-                "model": "glm-4-air-250414",
-                "messages": [
-                    {"role": "system", "content": "你是一个专业的关键词提取专家。"},
-                    {"role": "user", "content": prompt_text},
-                ],
-                "max_tokens": 50,
-                "temperature": 0.3,
-            }
-
-            print(f"  正在调用GLM-4 (glm-4-air-250414) 提取关键词...")
-
-            async with session.post(
-                self.api_url,
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as response:
-                if response.status == 429:
-                    print(f"  GLM API请求频率限制")
-                    return None
-                elif response.status != 200:
-                    error_text = await response.text()
-                    print(f"  GLM API响应错误: {response.status}")
-                    return None
-
-                result = await response.json()
-
             # 检查响应中是否有错误信息
             if "error" in result:
                 error_info = result["error"]
@@ -96,6 +142,7 @@ Wikipedia搜索关键词："""
                     keyword = choice["message"]["content"].strip()
                     # 清理可能的多余字符
                     keyword = keyword.strip("\"'")
+
 
                     # 验证关键词不为空且合理
                     if keyword and len(keyword) > 0:
@@ -115,15 +162,8 @@ Wikipedia搜索关键词："""
             else:
                 print(f"  GLM API响应格式异常")
                 return None
-
-        except asyncio.TimeoutError:
-            print(f"  GLM API请求超时")
-            return None
-        except aiohttp.ClientError as e:
-            print(f"  GLM API网络请求失败: {e}")
-            return None
         except Exception as e:
-            print(f"  提取关键词时出现未知错误: {e}")
+            print(f"  处理GLM API响应时出错: {e}")
             return None
 
     async def search_wikipedia(
@@ -156,7 +196,7 @@ Wikipedia搜索关键词："""
                         return None
 
                 if not search_results:
-                    print(f"  未找到关键词 '{keyword}' 的Wikipedia页面")
+                    print(f"  未找到关键词 \'{keyword}\' 的Wikipedia页面")
                     return None
 
                 # 获取第一个搜索结果
@@ -165,9 +205,22 @@ Wikipedia搜索关键词："""
 
                 # 获取页面内容（全文）
                 try:
-                    page = wikipedia.page(page_title, auto_suggest=False)
-                    page_content = page.content  # 获取完整内容
-                    page_url = page.url
+                    # 增加超时设置
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("Wikipedia页面加载超时")
+                    
+                    # 设置10秒超时
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(10)
+                    
+                    try:
+                        page = wikipedia.page(page_title, auto_suggest=False)
+                        page_content = page.content  # 获取完整内容
+                        page_url = page.url
+                    finally:
+                        signal.alarm(0)  # 取消超时
 
                     print(f"  成功获取完整内容，长度: {len(page_content)} 字符")
 
@@ -204,7 +257,7 @@ Wikipedia搜索关键词："""
                     return None
 
             except Exception as e:
-                print(f"  Wikipedia搜索 '{keyword}' 时出错: {e}")
+                print(f"  Wikipedia搜索 \'{keyword}\' 时出错: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -310,8 +363,8 @@ async def process_all_articles():
 
     # 创建aiohttp会话
     connector = aiohttp.TCPConnector(
-        limit=20,
-        limit_per_host=10,
+        limit=50,  # 增加总连接数限制
+        limit_per_host=30,  # 增加每个主机的连接数限制，匹配并发数
         ttl_dns_cache=300,
         use_dns_cache=True,
         keepalive_timeout=60,
@@ -325,7 +378,7 @@ async def process_all_articles():
         headers={"User-Agent": "AutoPopsci-Bot/1.0 (Educational Research)"},
     ) as session:
         # 使用信号量控制并发数量
-        semaphore = asyncio.Semaphore(10)  # 限制并发数为10
+        semaphore = asyncio.Semaphore(30)  # 限制并发数为30
 
         async def process_with_semaphore(article, index):
             async with semaphore:
@@ -333,7 +386,7 @@ async def process_all_articles():
                     session, article, index, len(articles)
                 )
                 # 添加延迟以避免API限制
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)  # 减少延迟，因为我们有更多的并发
                 return result
 
         # 创建并发任务
@@ -413,4 +466,3 @@ async def process_all_articles():
 
 if __name__ == "__main__":
     asyncio.run(process_all_articles())
-

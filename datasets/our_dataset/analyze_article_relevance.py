@@ -1,5 +1,5 @@
 import json
-import requests
+import openai
 import concurrent.futures
 import time
 from typing import Dict, Any, Tuple
@@ -7,9 +7,9 @@ import os
 import re
 
 # API配置
-API_URL = "https://api.xianfeiglobal.com/v1/chat/completions"
-API_KEY = "sk-dZgSCtrdDfFUny3NPwoXrAWU2Bq0cfSq9tUN005ZECsiOmKE"
-MODEL_NAME = "deepseek-r1"
+API_KEY = "sk-F8sMUgSUkCgbd4eg43CaD6Ba99494dA4A776C5F8C05248F1"
+BASE_URL = "https://api.ai-gaochao.cn/v1/"
+MODEL_NAME = "grok-4-1-fast-reasoning"
 
 # 输入和输出文件路径
 INPUT_FILE = "/home/zym/Auto-Popsci/datasets/our_dataset/merged_popular_science_articles_with_wikipedia.json"
@@ -21,38 +21,28 @@ def truncate_text(text: str, max_length: int = 3000) -> str:
         return text
     return text[:max_length] + "...[内容已截断]"
 
-def call_deepseek_api(prompt: str, max_retries: int = 3) -> str:
-    """调用DeepSeek API"""
-    headers = {
-        "Content-Type": "application/json", 
-        "Authorization": f"Bearer {API_KEY}"
-    }
-    
-    body = {
-        "model": MODEL_NAME,
-        "messages": [
-            {
-                "role": "system",
-                "content": "你是一个专业的文本分析助手，能够准确地总结文章内容并分析文章间的关联性。请提供简洁、准确的分析结果。"
-            },
-            {
-                "role": "user", 
-                "content": prompt
-            }
-        ],
-        "temperature": 0.3
-    }
+def call_grok_api(prompt: str, max_retries: int = 3) -> str:
+    """调用Grok API"""
+    openai.api_key = API_KEY
+    openai.base_url = BASE_URL
     
     for attempt in range(max_retries):
         try:
-            response = requests.post(API_URL, json=body, headers=headers, timeout=60)
-            if response.status_code == 200:
-                result = response.json()
-                return result["choices"][0]["message"]["content"]
-            else:
-                print(f"API调用失败，状态码: {response.status_code}, 尝试: {attempt+1}/{max_retries}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # 指数退避
+            response = openai.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的文本分析助手，能够准确地总结文章内容并分析文章间的关联性。请提供简洁、准确的分析结果。"
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
+                ],
+                temperature=0.3
+            )
+            return response.choices[0].message.content
         except Exception as e:
             print(f"API调用异常: {str(e)}, 尝试: {attempt+1}/{max_retries}")
             if attempt < max_retries - 1:
@@ -96,7 +86,7 @@ Wikipedia文章内容: {wiki_content}
 """
     
     # 调用API
-    response = call_deepseek_api(prompt)
+    response = call_grok_api(prompt)
     
     # 尝试解析JSON响应
     try:
@@ -173,7 +163,7 @@ def main():
     print("开始分析文章关联性...")
     start_time = time.time()
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
         # 提交所有任务
         future_to_index = {
             executor.submit(process_article_pair, data, i, len(data_list)): i
