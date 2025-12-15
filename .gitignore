@@ -1,7 +1,7 @@
 baselines/meta-llama/Meta-Llama-3.1-8B-Instruct/results/
 baselines/meta-llama/Meta-Llama-3.1-8B-Instruct/runs/
 datasets/popsci.parquet
-auto_popsci/evaluation/vividness/figurativeness/MelBERT
+auto_popsci/evaluation/vividness/figurativeness/MelBERT/
 *.bin
 *.pt
 *.pth
