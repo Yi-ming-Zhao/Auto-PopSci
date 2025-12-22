@@ -13,25 +13,57 @@ USE_IMPORTED_PPL = False
 print("Using simple PPL implementation to avoid module dependencies")
 
 
+# 全局变量缓存模型和分词器
+_cached_model = None
+_cached_tokenizer = None
+
 def simple_cal_ppl(text):
     """
     简单的困惑度计算实现
     使用transformers库的GPT2模型
+    使用全局缓存避免重复加载模型
     """
+    global _cached_model, _cached_tokenizer
+    
     try:
         from transformers import GPT2LMHeadModel, GPT2Tokenizer
         import torch
 
-        # 加载预训练模型和分词器
-        model = GPT2LMHeadModel.from_pretrained("gpt2")
-        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-        model.eval()  # 设为评估模式
+        # 如果模型未缓存，则加载
+        if _cached_model is None or _cached_tokenizer is None:
+            try:
+                print("正在加载 GPT-2 模型...")
+                # 首先尝试使用本地缓存（避免网络问题）
+                try:
+                    _cached_tokenizer = GPT2Tokenizer.from_pretrained("gpt2", local_files_only=True)
+                    _cached_model = GPT2LMHeadModel.from_pretrained("gpt2", local_files_only=True)
+                    print("✅ 从本地缓存加载 GPT-2 模型成功")
+                except Exception as local_error:
+                    # 如果本地缓存不存在，尝试下载（可能会因网络问题失败）
+                    print(f"⚠️ 本地缓存加载失败，尝试下载: {local_error}")
+                    _cached_tokenizer = GPT2Tokenizer.from_pretrained("gpt2", local_files_only=False)
+                    _cached_model = GPT2LMHeadModel.from_pretrained("gpt2", local_files_only=False)
+                    print("✅ 下载并加载 GPT-2 模型成功")
+                
+                _cached_model.eval()  # 设为评估模式
+            except Exception as e:
+                print(f"⚠️ GPT-2 模型加载失败: {e}")
+                print("将跳过连贯性评估，使用默认困惑度值")
+                # 设置标记，避免后续重复尝试
+                _cached_model = "FAILED"
+                _cached_tokenizer = "FAILED"
+                return 1000.0  # 返回一个默认的高值
+        
+        # 如果之前加载失败，直接返回默认值
+        if _cached_model == "FAILED" or _cached_tokenizer == "FAILED":
+            return 1000.0
 
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        # 使用缓存的模型和分词器
+        inputs = _cached_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
         input_ids = inputs.input_ids
 
         with torch.no_grad():
-            outputs = model(input_ids, labels=input_ids)
+            outputs = _cached_model(input_ids, labels=input_ids)
             logits = outputs.logits
 
         # 计算每个token的预测概率
@@ -49,7 +81,7 @@ def simple_cal_ppl(text):
         ppl = torch.exp(nll).item()
         return ppl
     except Exception as e:
-        print(f"Error in simple PPL calculation: {e}")
+        print(f"⚠️ 困惑度计算失败: {e}")
         return 1000.0  # 返回一个默认的高值
 
 

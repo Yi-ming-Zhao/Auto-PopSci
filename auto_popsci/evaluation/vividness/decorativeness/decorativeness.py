@@ -2,6 +2,9 @@
 Decorativeness Evaluator
 用于评估文本修饰性词汇丰富度的模块
 
+本模块仅使用NLTK词性标注（POS tagging）来识别修饰性词汇（形容词和副词），
+不使用预定义词表，确保评估结果更加客观和通用。
+
 Usage:
     evaluator = DecorativenessEvaluator()
     score = evaluator.evaluate_text("Your text here")
@@ -11,18 +14,37 @@ Usage:
 import os
 import re
 import string
+from tkinter import FALSE
 import numpy as np
 from collections import defaultdict
 from tqdm import tqdm
+
+def _check_nltk_data(nltk_module, data_name):
+    """检查NLTK数据是否已下载"""
+    try:
+        nltk_module.data.find(data_name)
+        return True
+    except LookupError:
+        return False
 
 try:
     import nltk
     from nltk import pos_tag, word_tokenize
     from nltk.corpus import wordnet
-    nltk.download('punkt', quiet=False)
-    nltk.download('averaged_perceptron_tagger', quiet=False)
-    nltk.download('averaged_perceptron_tagger_eng', quiet=False)
-    nltk.download('wordnet', quiet=False)
+    
+    # 检查并下载punkt（分词器）
+    if not _check_nltk_data(nltk, 'tokenizers/punkt'):
+        nltk.download('punkt', quiet=False)
+    
+    # 检查并下载词性标注器
+    if not _check_nltk_data(nltk, 'taggers/averaged_perceptron_tagger'):
+        nltk.download('averaged_perceptron_tagger', quiet=False)
+        nltk.download('averaged_perceptron_tagger_eng', quiet=False)
+    
+    # 检查并下载WordNet（虽然当前未使用，但保留以备将来使用）
+    if not _check_nltk_data(nltk, 'corpora/wordnet'):
+        nltk.download('wordnet', quiet=False)
+    
     NLTK_AVAILABLE = True
 except ImportError:
     print("Installing NLTK...")
@@ -32,91 +54,41 @@ except ImportError:
         import nltk
         from nltk import pos_tag, word_tokenize
         from nltk.corpus import wordnet
-        nltk.download('punkt', quiet=False)
-        nltk.download('averaged_perceptron_tagger', quiet=False)
-        nltk.download('averaged_perceptron_tagger_eng', quiet=False)
-        nltk.download('wordnet', quiet=False)
+        
+        # 检查并下载punkt（分词器）
+        if not _check_nltk_data(nltk, 'tokenizers/punkt'):
+            nltk.download('punkt', quiet=False)
+        
+        # 检查并下载词性标注器
+        if not _check_nltk_data(nltk, 'taggers/averaged_perceptron_tagger'):
+            nltk.download('averaged_perceptron_tagger', quiet=False)
+            nltk.download('averaged_perceptron_tagger_eng', quiet=False)
+        
+        # 检查并下载WordNet
+        if not _check_nltk_data(nltk, 'corpora/wordnet'):
+            nltk.download('wordnet', quiet=False)
+        
         NLTK_AVAILABLE = True
-    except:
-        print("Warning: NLTK not available, using fallback methods")
+    except Exception as e:
+        print(f"Warning: NLTK not available, using fallback methods: {e}")
         NLTK_AVAILABLE = False
 
 
 class DecorativenessEvaluator:
-    """评估文本修饰性词汇丰富度的类"""
+    """
+    评估文本修饰性词汇丰富度的类
+    
+    仅基于NLTK词性标注识别修饰性词汇：
+    - 形容词：JJ（原级）、JJR（比较级）、JJS（最高级）
+    - 副词：RB（原级）、RBR（比较级）、RBS（最高级）
+    """
 
     def __init__(self):
-        """初始化修饰性评估器"""
-        # 修饰性词性标签
+        """初始化修饰性评估器（仅使用NLTK词性标注，不使用预定义词表）"""
+        # 修饰性词性标签（Penn Treebank POS tags）
         self.decorative_pos_tags = {
             'adjectives': {'JJ', 'JJR', 'JJS'},  # 形容词：原级、比较级、最高级
             'adverbs': {'RB', 'RBR', 'RBS'},    # 副词：原级、比较级、最高级
-        }
-
-        # 修饰性词汇（常用形容词和副词）
-        self.decorative_words = {
-            'adjectives': [
-                # 颜色类
-                'red', 'blue', 'green', 'yellow', 'black', 'white', 'gray', 'brown',
-                'golden', 'silver', 'purple', 'orange', 'pink', 'violet', 'indigo',
-
-                # 大小形状
-                'big', 'small', 'large', 'tiny', 'huge', 'massive', 'minute',
-                'round', 'square', 'circular', 'triangular', 'rectangular', 'oval',
-                'long', 'short', 'tall', 'wide', 'narrow', 'thick', 'thin',
-
-                # 感官特征
-                'bright', 'dark', 'shiny', 'dull', 'colorful', 'plain', 'transparent',
-                'smooth', 'rough', 'soft', 'hard', 'bumpy', 'grainy', 'silky',
-                'hot', 'cold', 'warm', 'cool', 'freezing', 'boiling', 'mild',
-                'loud', 'quiet', 'noisy', 'silent', 'soft', 'harsh', 'melodious',
-                'sweet', 'sour', 'bitter', 'salty', 'spicy', 'delicious', 'tasty',
-
-                # 情感状态
-                'beautiful', 'ugly', 'pretty', 'handsome', 'attractive', 'gorgeous',
-                'happy', 'sad', 'angry', 'calm', 'excited', 'nervous', 'confident',
-                'brave', 'cowardly', 'strong', 'weak', 'gentle', 'fierce', 'tough',
-
-                # 评价类
-                'good', 'bad', 'excellent', 'terrible', 'wonderful', 'awful',
-                'amazing', 'disappointing', 'perfect', 'imperfect', 'flawless',
-                'important', 'significant', 'minor', 'major', 'critical', 'trivial',
-                'useful', 'useless', 'helpful', 'harmful', 'effective', 'ineffective',
-
-                # 描述性
-                'new', 'old', 'ancient', 'modern', 'fresh', 'stale', 'young',
-                'fast', 'slow', 'quick', 'rapid', 'gradual', 'instant', 'delayed',
-                'clear', 'unclear', 'obvious', 'hidden', 'visible', 'invisible',
-                'simple', 'complex', 'easy', 'difficult', 'basic', 'advanced'
-            ],
-            'adverbs': [
-                # 程度副词
-                'very', 'extremely', 'highly', 'deeply', 'truly', 'really', 'actually',
-                'absolutely', 'completely', 'totally', 'entirely', 'perfectly',
-                'quite', 'rather', 'fairly', 'pretty', 'somewhat', 'slightly',
-                'almost', 'nearly', 'approximately', 'roughly', 'about',
-
-                # 方式副词
-                'quickly', 'slowly', 'carefully', 'carelessly', 'easily', 'difficultly',
-                'beautifully', 'gracefully', 'elegantly', 'clumsily', 'awkwardly',
-                'loudly', 'quietly', 'softly', 'harshly', 'gently', 'roughly',
-                'brightly', 'dimly', 'clearly', 'unclearly', 'obviously', 'secretly',
-
-                # 时间频率
-                'always', 'never', 'often', 'sometimes', 'rarely', 'seldom',
-                'frequently', 'occasionally', 'usually', 'normally', 'typically',
-                'daily', 'weekly', 'monthly', 'yearly', 'regularly', 'occasionally',
-
-                # 地点位置
-                'here', 'there', 'everywhere', 'nowhere', 'somewhere', 'anywhere',
-                'inside', 'outside', 'abroad', 'nearby', 'far', 'close', 'away',
-                'up', 'down', 'forward', 'backward', 'across', 'through', 'around',
-
-                # 强调副词
-                'definitely', 'certainly', 'surely', 'undoubtedly', 'clearly',
-                'obviously', 'naturally', 'surprisingly', 'amazingly', 'incredibly',
-                'remarkably', 'notably', 'significantly', 'considerably', 'substantially'
-            ]
         }
 
     def _tokenize_text(self, text):
@@ -163,7 +135,7 @@ class DecorativenessEvaluator:
 
     def _count_decorative_words(self, text):
         """
-        统计修饰性词汇数量
+        统计修饰性词汇数量（仅基于NLTK词性标注）
 
         Args:
             text (str): 输入文本
@@ -186,9 +158,8 @@ class DecorativenessEvaluator:
         tagged_words = self._pos_tag_words(words)
         total_words = len(words)
 
-        # 统计词性
+        # 统计词性（仅基于POS标签）
         pos_counts = defaultdict(int)
-        word_counts = defaultdict(int)
 
         for word, pos_tag in tagged_words:
             # 统计形容词
@@ -198,15 +169,8 @@ class DecorativenessEvaluator:
             elif pos_tag in self.decorative_pos_tags['adverbs']:
                 pos_counts['adverbs'] += 1
 
-            # 统计预定义修饰词汇
-            if word in self.decorative_words['adjectives']:
-                word_counts['adjectives'] += 1
-            if word in self.decorative_words['adverbs']:
-                word_counts['adverbs'] += 1
-
-        # 合并词性标注和词汇列表的统计结果
-        total_adjectives = max(pos_counts['adjectives'], word_counts['adjectives'])
-        total_adverbs = max(pos_counts['adverbs'], word_counts['adverbs'])
+        total_adjectives = pos_counts['adjectives']
+        total_adverbs = pos_counts['adverbs']
         total_decorative = total_adjectives + total_adverbs
 
         # 计算比率
@@ -226,7 +190,7 @@ class DecorativenessEvaluator:
 
     def _calculate_decorative_diversity(self, text):
         """
-        计算修饰性词汇多样性
+        计算修饰性词汇多样性（仅基于NLTK词性标注）
 
         Args:
             text (str): 输入文本
@@ -237,13 +201,11 @@ class DecorativenessEvaluator:
         words = self._tokenize_text(text)
         tagged_words = self._pos_tag_words(words)
 
-        # 提取修饰性词汇
+        # 提取修饰性词汇（仅基于POS标签）
         decorative_words = []
         for word, pos_tag in tagged_words:
             if (pos_tag in self.decorative_pos_tags['adjectives'] or
-                pos_tag in self.decorative_pos_tags['adverbs'] or
-                word in self.decorative_words['adjectives'] or
-                word in self.decorative_words['adverbs']):
+                pos_tag in self.decorative_pos_tags['adverbs']):
                 decorative_words.append(word)
 
         if len(decorative_words) == 0:
@@ -281,13 +243,14 @@ class DecorativenessEvaluator:
 
     def evaluate_text(self, text):
         """
-        评估单个文本的修饰性词汇丰富度
+        评估单个文本的修饰性词汇丰富度（仅基于NLTK词性标注）
 
         Args:
             text (str): 输入文本
 
         Returns:
             float: 修饰性丰富度分数 (0-1)，越高表示修饰越丰富
+                   分数由强度（60%）和多样性（40%）加权计算
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return 0.0

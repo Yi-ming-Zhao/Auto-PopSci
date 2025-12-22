@@ -33,15 +33,22 @@ async def get_llm_response(client, prompt_text, current_model):
             ],
         )
     except Exception as e:
-        print(f"Error: {e}")
-        return "API connection Error: " + str(e)
+        error_msg = str(e)
+        print(f"Error: {error_msg}")
+        # 检查是否是余额不足错误
+        if "402" in error_msg or "Insufficient Balance" in error_msg or "insufficient" in error_msg.lower():
+            return json.dumps([])  # 返回空列表的 JSON 字符串
+        return json.dumps([])  # 其他错误也返回空列表
 
     if response and response.choices:
         result = response.choices[0].message.content
-        print(f"Key facts extraction result: {result}")
+        # 检查结果是否包含错误信息
+        if result and ("Error" in result or "error" in result.lower() or "Insufficient Balance" in result):
+            print(f"⚠️ LLM 返回错误信息: {result[:200]}")
+            return json.dumps([])  # 返回空列表
         return result
     else:
-        return "No keyfacts found."
+        return json.dumps([])  # 返回空列表的 JSON 字符串
 
 
 async def async_single_paper_keyfacts_precision_calculation(
@@ -90,9 +97,18 @@ async def async_single_paper_keyfacts_precision_calculation(
 
     tasks = []
     auth_info = read_yaml_file("auto_popsci/auth.yaml")
-    current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
-    current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
-    current_model = auth_info[args.llm_type][args.model_type]["model"]
+    # 评估 keyfacts precision/recall 时使用 grok
+    grok_config = auth_info.get("grok", {})
+    current_api_key = grok_config.get("api_key", "")
+    current_base_url = grok_config.get("base_url", "")
+    current_model = grok_config.get("model", "grok-4-1-fast-reasoning")
+    
+    # 如果 grok 配置不存在，回退到 args 中的配置
+    if not current_api_key:
+        current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
+        current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
+        current_model = auth_info[args.llm_type][args.model_type]["model"]
+    
     client = AsyncOpenAI(
         api_key=current_api_key,
         base_url=current_base_url,
@@ -128,19 +144,40 @@ async def async_single_paper_keyfacts_precision_calculation(
         )
     )
     responses = await asyncio.gather(*tasks)
+    # 初始化默认值
+    tp_1 = 0
+    tp_2 = 0
+    tp_3 = 0
+    tp_overall = 0
+    
     for i, response in enumerate(responses):
-        if i == 0:
+        try:
+            # 检查响应是否包含错误信息
+            if isinstance(response, str) and ("Error" in response or "error" in response.lower()):
+                print(f"⚠️ 响应包含错误信息: {response[:200]}")
+                continue
+            
+            # 尝试解析 JSON
             parsed_response = json.loads(response)
-            tp_1 = len(parsed_response)
-        elif i == 1:
-            parsed_response = json.loads(response)
-            tp_2 = len(parsed_response)
-        elif i == 2:
-            parsed_response = json.loads(response)
-            tp_3 = len(parsed_response)
-        else:
-            parsed_response = json.loads(response)
-            tp_overall = len(parsed_response)
+            if isinstance(parsed_response, list):
+                if i == 0:
+                    tp_1 = len(parsed_response)
+                elif i == 1:
+                    tp_2 = len(parsed_response)
+                elif i == 2:
+                    tp_3 = len(parsed_response)
+                else:
+                    tp_overall = len(parsed_response)
+            else:
+                print(f"⚠️ 响应格式不正确，期望列表，得到: {type(parsed_response)}")
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSON 解析失败 (任务 {i}): {e}")
+            print(f"   响应内容: {response[:500] if response else 'None'}")
+            # 继续处理其他响应
+        except Exception as e:
+            print(f"⚠️ 处理响应时出错 (任务 {i}): {e}")
+            import traceback
+            traceback.print_exc()
 
     precisions = {
         "priority_1": tp_1 / tp_plus_fp_1 if tp_plus_fp_1 > 0 else -1,

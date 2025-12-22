@@ -3,3 +3,9 @@ deepseek:
     api_key: "sk-f2b58c6a76c44f02a909d945d2bef443"
     base_url: "https://api.deepseek.com"
     model: "deepseek-reasoner"
+
+grok:
+  api_key: "sk-bU1KL2tjn28EVuKU354a1c8c7a5045378b888a79669188A3"
+  base_url: "https://api.ai-gaochao.cn/v1/"
+  model: "grok-4-1-fast-reasoning"
+
