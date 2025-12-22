@@ -240,7 +240,7 @@ class ComprehensiveEvaluator:
         
         try:
             # 读取认证信息
-            auth_info = read_yaml_file("auto_popsci/auth.yaml")
+            auth_info = read_yaml_file("auth.yaml")
             
             # 根据 text_type 选择模型和配置
             # 现在 Wikipedia 和科普 keyfacts 都使用 grok

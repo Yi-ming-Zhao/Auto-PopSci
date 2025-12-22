@@ -96,7 +96,7 @@ async def async_single_paper_keyfacts_precision_calculation(
     tp_plus_fp_3 = len(keyfacts_priority_3)
 
     tasks = []
-    auth_info = read_yaml_file("auto_popsci/auth.yaml")
+    auth_info = read_yaml_file("auth.yaml")
     # 评估 keyfacts precision/recall 时使用 grok
     grok_config = auth_info.get("grok", {})
     current_api_key = grok_config.get("api_key", "")

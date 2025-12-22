@@ -84,7 +84,7 @@ async def generate_popsci_from_keyfacts(args, key_facts, paper_title, paper):
     """
     start_time = time.time()
     print(f"Generating popsci from the key facts: {paper_title}")
-    auth_info = read_yaml_file("auto_popsci/auth.yaml")
+    auth_info = read_yaml_file("auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]

@@ -189,7 +189,7 @@ async def extract_keyfacts(args, paper, paper_title):
     """
     start_time = time.time()
     print(f"Extracting key facts from the paper: {paper_title}")
-    auth_info = read_yaml_file("auto_popsci/auth.yaml")
+    auth_info = read_yaml_file("auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
@@ -334,7 +334,7 @@ async def get_llm_response(args, prompt_text):
     """
     start_time = time.time()
     print(f"Getting LLM response...")
-    auth_info = read_yaml_file("auto_popsci/auth.yaml")
+    auth_info = read_yaml_file("auth.yaml")
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]

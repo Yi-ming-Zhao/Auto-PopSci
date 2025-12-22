@@ -15,7 +15,7 @@ import yaml
 import re
 
 # 配置文件路径
-API_CONFIG_FILE = "/home/zym/Auto-Popsci/auto_popsci/auth.yaml"
+API_CONFIG_FILE = "/home/zym/Auto-Popsci/auth.yaml"
 # 输入和输出文件路径
 INPUT_FILE = "/home/zym/Auto-Popsci/datasets/our_dataset/analyzed_articles_score_10_test.json"
 OUTPUT_DIR = "/home/zym/Auto-Popsci/baselines/grok-4-1-fast-reasoning/output"
