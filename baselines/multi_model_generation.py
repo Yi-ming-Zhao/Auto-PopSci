@@ -31,10 +31,13 @@ INPUT_FILE = os.path.join(
 OUTPUT_FILE = os.path.join(
     os.path.dirname(__file__), "multi_model_generation_output.json"
 )
+INCREMENTAL_FILE = os.path.join(
+    os.path.dirname(__file__), "multi_model_generation_output_incremental.json"
+)
 
 # 模型配置映射（auth.yaml 中的键名 -> (子键名, 显示名称)）
 MODEL_CONFIGS = {
-    "openai": ("gpt-5.2", "gpt-5.2"),
+    # "openai": ("gpt-5.2", "gpt-5.2"),
     "anthropic": (
         "claude-opus-4-5-20251101-thinking",
         "claude-opus-4-5-20251101-thinking",
@@ -67,23 +70,171 @@ MODEL_TIMEOUTS = {
 # ==================== 工具函数 ====================
 
 
-def save_results(
+def is_valid_popsci_content(content: str) -> bool:
+    """检查科普内容是否有效（不是"Generation Incomplete"或其他无效标记）"""
+    if not content or not isinstance(content, str):
+        return False
+
+    content_lower = content.strip().lower()
+    invalid_markers = [
+        "generation incomplete",
+        "generation failed",
+        "生成失败",
+        "generation timeout",
+        "api调用失败",
+        "api调用超时",
+        "api调用被中断",
+    ]
+
+    for marker in invalid_markers:
+        if marker in content_lower:
+            return False
+
+    # 如果内容太短（少于10个字符），也认为无效
+    if len(content.strip()) < 10:
+        return False
+
+    return True
+
+
+def load_existing_results() -> Dict[int, Dict[str, Dict[str, str]]]:
+    """加载现有的输出文件中的结果（包括原始文件和增量文件）"""
+    article_model_results = {}
+
+    # 先加载原始文件
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            print(f"\n加载现有结果文件: {OUTPUT_FILE}")
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                existing_results = json.load(f)
+
+            # 转换为 article_model_results 格式: {article_index: {model_name: {title, content}}}
+            for i, result in enumerate(existing_results):
+                models_dict = result.get("models", {})
+                if models_dict:
+                    article_model_results[i] = {}
+                    for model_name, model_result in models_dict.items():
+                        if isinstance(model_result, dict) and "content" in model_result:
+                            article_model_results[i][model_name] = model_result
+
+            print(f"成功加载 {len(article_model_results)} 篇文章的原始结果")
+        except Exception as e:
+            print(f"加载原始结果文件时出错: {str(e)}")
+
+    # 再加载增量文件（覆盖原始文件的结果）
+    if os.path.exists(INCREMENTAL_FILE):
+        try:
+            print(f"加载增量结果文件: {INCREMENTAL_FILE}")
+            with open(INCREMENTAL_FILE, "r", encoding="utf-8") as f:
+                incremental_results = json.load(f)
+
+            # 合并增量结果（覆盖原始结果）
+            for article_idx, models_dict in incremental_results.items():
+                article_idx = int(article_idx)  # 确保是整数
+                if article_idx not in article_model_results:
+                    article_model_results[article_idx] = {}
+                article_model_results[article_idx].update(models_dict)
+
+            print(f"成功加载并合并增量结果，共 {len(article_model_results)} 篇文章")
+        except Exception as e:
+            print(f"加载增量结果文件时出错: {str(e)}")
+
+    return article_model_results
+
+
+def save_incremental_results(
+    article_model_results: Dict[int, Dict[str, Dict[str, str]]],
+) -> None:
+    """增量保存新生成的结果到临时文件（轻量级，只保存新结果）"""
+    try:
+        # 加载现有的增量文件（如果存在）
+        incremental_data = {}
+        if os.path.exists(INCREMENTAL_FILE):
+            try:
+                with open(INCREMENTAL_FILE, "r", encoding="utf-8") as f:
+                    incremental_data = json.load(f)
+            except Exception:
+                incremental_data = {}
+
+        # 合并新结果到增量数据
+        for article_idx, models_dict in article_model_results.items():
+            if article_idx not in incremental_data:
+                incremental_data[article_idx] = {}
+            incremental_data[article_idx].update(models_dict)
+
+        # 保存增量文件（只包含新生成的结果，文件较小）
+        with open(INCREMENTAL_FILE, "w", encoding="utf-8") as f:
+            json.dump(incremental_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存增量结果时出错: {str(e)}")
+
+
+def merge_and_save_final_results(
     article_model_results: Dict[int, Dict[str, Dict[str, str]]],
     data_list: List[Dict[str, Any]],
     model_configs: Dict[str, Dict[str, str]],
 ) -> None:
-    """保存当前已生成的结果到输出文件"""
+    """合并所有结果并保存到最终文件"""
     try:
-        # 合并结果
+        print("\n合并所有结果到最终文件...")
+
+        # 加载原始输出文件（如果存在）
+        existing_results = {}
+        if os.path.exists(OUTPUT_FILE):
+            try:
+                print(f"加载原始文件: {OUTPUT_FILE}")
+                with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+                    # 转换为 {article_index: {model_name: result}} 格式
+                    for i, result in enumerate(existing_data):
+                        models_dict = result.get("models", {})
+                        if models_dict:
+                            existing_results[i] = {}
+                            for model_name, model_result in models_dict.items():
+                                if (
+                                    isinstance(model_result, dict)
+                                    and "content" in model_result
+                                ):
+                                    existing_results[i][model_name] = model_result
+                print(f"已加载 {len(existing_results)} 篇文章的原始结果")
+            except Exception as e:
+                print(f"加载原始文件时出错: {str(e)}，将从头开始")
+                existing_results = {}
+
+        # 加载增量文件（如果存在）
+        incremental_results = {}
+        if os.path.exists(INCREMENTAL_FILE):
+            try:
+                print(f"加载增量文件: {INCREMENTAL_FILE}")
+                with open(INCREMENTAL_FILE, "r", encoding="utf-8") as f:
+                    incremental_results = json.load(f)
+                print(f"已加载 {len(incremental_results)} 篇文章的增量结果")
+            except Exception as e:
+                print(f"加载增量文件时出错: {str(e)}")
+                incremental_results = {}
+
+        # 合并所有结果：内存中的结果 > 增量文件 > 原始文件
+        merged_results = {}
+        for i in range(len(data_list)):
+            merged_results[i] = {}
+            # 先加载原始结果
+            if i in existing_results:
+                merged_results[i].update(existing_results[i])
+            # 然后用增量结果覆盖
+            if i in incremental_results:
+                merged_results[i].update(incremental_results[i])
+            # 最后用内存中的结果覆盖（最新）
+            if i in article_model_results:
+                merged_results[i].update(article_model_results[i])
+
+        # 构建最终结果格式
+        print("构建最终结果格式...")
         results = []
         for i, data in enumerate(data_list):
             models_dict = {}
             for model_name in model_configs.keys():
-                if (
-                    i in article_model_results
-                    and model_name in article_model_results[i]
-                ):
-                    models_dict[model_name] = article_model_results[i][model_name]
+                if i in merged_results and model_name in merged_results[i]:
+                    models_dict[model_name] = merged_results[i][model_name]
                 else:
                     original_data = data.get("original_data", {})
                     wiki_title = original_data.get("wikipedia_article", {}).get(
@@ -101,11 +252,25 @@ def save_results(
                 }
             )
 
-        # 保存到文件
+        # 保存到最终文件
+        print(f"保存最终结果到 {OUTPUT_FILE}...")
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
+
+        # 清理增量文件
+        if os.path.exists(INCREMENTAL_FILE):
+            try:
+                os.remove(INCREMENTAL_FILE)
+                print("已清理增量文件")
+            except Exception as e:
+                print(f"清理增量文件时出错: {str(e)}")
+
+        print("合并完成！")
     except Exception as e:
-        print(f"保存结果时出错: {str(e)}")
+        print(f"合并和保存最终结果时出错: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
 
 
 def load_all_model_configs() -> Dict[str, Dict[str, str]]:
@@ -402,9 +567,26 @@ async def process_model(
         timeout=model_timeout,
     )
 
-    # 创建所有需要处理的任务
-    tasks_to_process = [(i, data) for i, data in enumerate(data_list)]
+    # 创建所有需要处理的任务（过滤掉已有有效结果的文章）
+    tasks_to_process = []
+    skipped_count = 0
+    for i, data in enumerate(data_list):
+        # 检查是否已有有效的生成结果
+        if i in article_model_results and model_name in article_model_results[i]:
+            existing_content = article_model_results[i][model_name].get("content", "")
+            if is_valid_popsci_content(existing_content):
+                skipped_count += 1
+                continue
+        tasks_to_process.append((i, data))
+
+    if skipped_count > 0:
+        print(f"[{model_name}] 跳过 {skipped_count} 篇已有有效结果的文章")
     print(f"[{model_name}] 需要处理 {len(tasks_to_process)} 篇文章")
+
+    # 如果没有需要处理的任务，直接返回
+    if len(tasks_to_process) == 0:
+        print(f"[{model_name}] 所有文章都已处理完成，跳过")
+        return
 
     # 使用信号量控制并发数
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -436,14 +618,14 @@ async def process_model(
                 await coro
                 completed += 1
 
-                # 每完成一定数量的任务后保存一次结果
+                # 每完成一定数量的任务后保存一次增量结果
                 if completed % save_interval == 0:
                     completed_pct = completed / len(tasks) * 100 if tasks else 0
                     print(
-                        f"\n[{model_name}] 进度: {completed}/{len(tasks)} ({completed_pct:.1f}%) - 保存结果中..."
+                        f"\n[{model_name}] 进度: {completed}/{len(tasks)} ({completed_pct:.1f}%) - 保存增量结果中..."
                     )
-                    save_results(article_model_results, data_list, model_configs)
-                    print(f"[{model_name}] 结果已保存到 {OUTPUT_FILE}")
+                    save_incremental_results(article_model_results)
+                    print(f"[{model_name}] 增量结果已保存到 {INCREMENTAL_FILE}")
                 elif completed % 10 == 0:
                     # 每10个任务打印一次进度（不保存）
                     completed_pct = completed / len(tasks) * 100 if tasks else 0
@@ -462,11 +644,15 @@ async def process_model(
     finally:
         # 关闭客户端
         await client.close()
+        # 如果被中断，保存已生成的增量结果
+        if interrupt_flag or completed > 0:
+            print(f"\n[{model_name}] 保存增量结果中...")
+            save_incremental_results(article_model_results)
+            print(f"[{model_name}] 增量结果已保存到 {INCREMENTAL_FILE}")
 
-    # 模型处理完成后保存一次结果
-    print(f"\n[{model_name}] 处理完成: {completed}/{len(tasks)} 篇文章，保存结果中...")
-    save_results(article_model_results, data_list, model_configs)
-    print(f"[{model_name}] 结果已保存到 {OUTPUT_FILE}")
+    # 模型处理完成后保存一次增量结果（如果正常完成）
+    if not interrupt_flag:
+        print(f"\n[{model_name}] 处理完成: {completed}/{len(tasks)} 篇文章")
 
     elapsed_time = time.time() - start_time
     print(f"[{model_name}] 耗时 {elapsed_time/60:.1f} 分钟")
@@ -521,10 +707,13 @@ async def main():
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    # 初始化结果
-    article_model_results = {}
+    # 加载现有结果（如果存在）
+    article_model_results = load_existing_results()
+
+    # 确保所有文章索引都存在
     for i in range(len(data_list)):
-        article_model_results[i] = {}
+        if i not in article_model_results:
+            article_model_results[i] = {}
 
     print(f"\n开始生成科普文章...")
     print(f"每个模型使用 {MAX_CONCURRENT} 并发")
@@ -535,54 +724,42 @@ async def main():
     progress_counter = {}
 
     # 按顺序处理每个模型
-    for model_name, model_config in model_configs.items():
+    try:
+        for model_name, model_config in model_configs.items():
+            if interrupt_flag:
+                print("\n处理被中断")
+                break
+
+            try:
+                await process_model(
+                    model_name,
+                    model_config,
+                    data_list,
+                    article_model_results,
+                    progress_counter,
+                    model_configs,
+                )
+            except KeyboardInterrupt:
+                interrupt_flag = True
+                break
+            except Exception as e:
+                print(f"处理模型 {model_name} 时出错: {str(e)}")
+                continue
+    finally:
+        # 如果被中断，保存增量结果
         if interrupt_flag:
-            print("\n处理被中断")
-            break
+            print("\n保存已生成的增量结果...")
+            save_incremental_results(article_model_results)
+            print(f"增量结果已保存到 {INCREMENTAL_FILE}")
+            print("提示: 下次运行时将自动加载这些结果，继续生成")
 
-        try:
-            await process_model(
-                model_name,
-                model_config,
-                data_list,
-                article_model_results,
-                progress_counter,
-                model_configs,
-            )
-        except KeyboardInterrupt:
-            interrupt_flag = True
-            break
-        except Exception as e:
-            print(f"处理模型 {model_name} 时出错: {str(e)}")
-            continue
+    # 合并所有结果并保存到最终文件
+    merge_and_save_final_results(article_model_results, data_list, model_configs)
 
-    # 合并结果
-    print("\n合并结果...")
-    results = []
-    for i, data in enumerate(data_list):
-        models_dict = {}
-        for model_name in model_configs.keys():
-            if i in article_model_results and model_name in article_model_results[i]:
-                models_dict[model_name] = article_model_results[i][model_name]
-            else:
-                original_data = data.get("original_data", {})
-                wiki_title = original_data.get("wikipedia_article", {}).get("title", "")
-                models_dict[model_name] = {
-                    "title": wiki_title + " - Generation Incomplete",
-                    "content": "Generation Incomplete",
-                }
-
-        results.append(
-            {
-                "original_data": data,
-                "models": models_dict,
-            }
-        )
-
-    # 保存结果
-    print(f"\n保存生成结果到 {OUTPUT_FILE}...")
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    # 加载最终结果用于统计
+    print(f"\n加载最终结果用于统计...")
+    with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+        results = json.load(f)
 
     total_time = time.time() - start_time
     print(f"\n生成完成!")
