@@ -122,7 +122,30 @@ class ComprehensiveEvaluator:
                 print("   将跳过生动性评估")
                 import traceback
                 traceback.print_exc()
+                traceback.print_exc()
                 self.vividness_evaluator = None
+
+        # Initialize Informativeness Evaluator
+        try:
+            from .informativeness.evaluate_informativeness import InformativenessEvaluator
+            self.informativeness_evaluator = InformativenessEvaluator()
+            print("✅ InformativenessEvaluator initialized")
+        except Exception as e:
+            print(f"⚠️ InformativenessEvaluator initialization failed: {e}")
+            self.informativeness_evaluator = None
+
+    async def evaluate_informativeness(self, wiki_text: str, popsci_text: str) -> Dict:
+        """
+        Evaluate informativeness (MCQ-based QA).
+        """
+        if not self.informativeness_evaluator:
+            return {'score': 0.0, 'note': 'Evaluator not available'}
+        
+        try:
+            return await self.informativeness_evaluator.evaluate_text_pair(wiki_text, popsci_text)
+        except Exception as e:
+            print(f"⚠️ Informativeness evaluation failed: {e}")
+            return {'score': 0.0, 'error': str(e)}
     
     def evaluate_coherence(self, text: str) -> float:
         """
@@ -415,7 +438,9 @@ class ComprehensiveEvaluator:
         generated_keyfacts: Optional[Union[str, List[Dict], Dict]] = None,
         ground_truth_keyfacts_path: Optional[str] = None,
         generated_keyfacts_path: Optional[str] = None,
-        include_keyfacts: bool = True
+        include_keyfacts: bool = True,
+        include_informativeness: bool = True,
+        informativeness_result: Optional[Dict] = None
     ) -> Dict:
         """
         评估单个文档
@@ -429,6 +454,8 @@ class ComprehensiveEvaluator:
             ground_truth_keyfacts_path: 真实关键事实文件路径
             generated_keyfacts_path: 生成关键事实文件路径
             include_keyfacts: 是否包含关键事实评估
+            include_informativeness: 是否包含信息量评估 (QA)
+            informativeness_result: 预计算的信息量评估结果 (可选)
             
         Returns:
             dict: 包含所有评估指标的结果字典
@@ -438,7 +465,8 @@ class ComprehensiveEvaluator:
             'coherence': {},
             'simplicity': {},
             'vividness': {},
-            'keyfacts': {}
+            'keyfacts': {},
+            'informativeness': {}
         }
         
         # 1. 评估连贯性
@@ -510,6 +538,46 @@ class ComprehensiveEvaluator:
             result['keyfacts'] = {
                 'note': '未包含关键事实评估'
             }
+
+        # 5. 评估信息量 (QA Based)
+        if informativeness_result:
+            result['informativeness'] = informativeness_result
+        elif include_informativeness:
+            if original_text and popsci_text:
+                print("📊 评估信息量 (QA Based)...")
+                
+                # 尝试解析 keyfacts
+                wiki_kf = None
+                popsci_kf = None
+                
+                if isinstance(ground_truth_keyfacts, list): wiki_kf = ground_truth_keyfacts
+                elif isinstance(ground_truth_keyfacts, str): 
+                    try: wiki_kf = json.loads(ground_truth_keyfacts)
+                    except: pass
+                
+                if isinstance(generated_keyfacts, list): popsci_kf = generated_keyfacts
+                elif isinstance(generated_keyfacts, str):
+                    try: popsci_kf = json.loads(generated_keyfacts)
+                    except: pass
+                
+                try:
+                    if self.informativeness_evaluator:
+                        info_res = await self.informativeness_evaluator.evaluate_text_pair(
+                            original_text, 
+                            popsci_text, 
+                            wiki_keyfacts=wiki_kf, 
+                            popsci_keyfacts=popsci_kf
+                        )
+                        result['informativeness'] = info_res if info_res else {'score': 0.0, 'note': 'Evaluation returned None'}
+                    else:
+                         result['informativeness'] = {'score': 0.0, 'note': 'Evaluator not initialized'}
+                except Exception as e:
+                    print(f"⚠️ 信息量评估失败: {e}")
+                    result['informativeness'] = {'score': 0.0, 'error': str(e)}
+            else:
+                result['informativeness'] = {'score': 0.0, 'note': '缺少原始文本或科普文本'}
+        else:
+             result['informativeness'] = {'note': '未包含信息量评估'}
         
         return result
     
@@ -539,7 +607,8 @@ class ComprehensiveEvaluator:
             popsci_text_1,
             original_text,
             reference_text,
-            include_keyfacts=False
+            include_keyfacts=False,
+            include_informativeness=True
         )
         
         # 评估第二个文档
@@ -547,7 +616,8 @@ class ComprehensiveEvaluator:
             popsci_text_2,
             original_text,
             reference_text,
-            include_keyfacts=False
+            include_keyfacts=False,
+            include_informativeness=True
         )
         
         # 比较结果
@@ -569,6 +639,12 @@ class ComprehensiveEvaluator:
                 'text_2_score': result_2['vividness'].get('vividness_score', 0.0),
                 'better': 'text_1' if result_1['vividness'].get('vividness_score', 0.0) > result_2['vividness'].get('vividness_score', 0.0) else 'text_2',
                 'difference': abs(result_1['vividness'].get('vividness_score', 0.0) - result_2['vividness'].get('vividness_score', 0.0))
+            },
+            'informativeness': {
+                'text_1_score': result_1['informativeness'].get('score', 0.0),
+                'text_2_score': result_2['informativeness'].get('score', 0.0),
+                'better': 'text_1' if result_1['informativeness'].get('score', 0.0) > result_2['informativeness'].get('score', 0.0) else 'text_2',
+                'difference': abs(result_1['informativeness'].get('score', 0.0) - result_2['informativeness'].get('score', 0.0))
             }
         }
         
@@ -591,6 +667,7 @@ class ComprehensiveEvaluator:
         ground_truth_keyfacts_dir: Optional[str] = None,
         generated_keyfacts_dir: Optional[str] = None,
         include_keyfacts: bool = True,
+        include_informativeness: bool = True,
         auto_generate_keyfacts: bool = False
     ) -> Dict:
         """
@@ -613,6 +690,7 @@ class ComprehensiveEvaluator:
             generated_keyfacts_dir: 生成关键事实文件目录（可选）
                 匹配策略同上
             include_keyfacts: 是否包含关键事实评估
+            include_informativeness: 是否包含信息量评估 (QA)
             auto_generate_keyfacts: 是否自动生成关键事实
                 如果为 True，将从 original_text 生成 Wikipedia keyfacts（使用 gemini-3-pro-preview），
                 从 popsci_text 生成科普 keyfacts（使用 grok）
@@ -664,7 +742,7 @@ class ComprehensiveEvaluator:
         doc_keyfacts_map = {}  # {doc_index: {'gt': None, 'gen': None}}
         
         # 第一遍：收集所有需要生成 keyfacts 的任务
-        if auto_generate_keyfacts and include_keyfacts:
+        if auto_generate_keyfacts and (include_keyfacts or include_informativeness):
             print(f"\n🔍 收集需要生成 keyfacts 的任务...")
             for i, item in enumerate(dataset):
                 popsci_text = get_nested_field(item, popsci_field, '')
@@ -754,6 +832,7 @@ class ComprehensiveEvaluator:
         
         # 第二遍：收集所有需要评估 keyfacts 的任务和文档信息（用于并发评估）
         keyfacts_evaluation_tasks = []  # [(doc_index, gt_keyfacts, gen_keyfacts, gt_path, gen_path), ...]
+        informativeness_evaluation_tasks = [] # [(doc_index, original_text, popsci_text, gt_keyfacts, gen_keyfacts), ...]
         doc_info_map = {}  # {doc_index: {item, popsci_text, original_text, ...}}
         
         # 收集所有文档信息和 keyfacts 评估任务
@@ -775,7 +854,8 @@ class ComprehensiveEvaluator:
             ground_truth_keyfacts_path = None
             generated_keyfacts_path = None
             
-            if include_keyfacts:
+            # 无论 include_keyfacts 与否，都尝试加载 keyfacts，因为 informativeness 可能也需要
+            if include_keyfacts or include_informativeness:
                 # 优先级：文件路径 > 数据集字段 > 自动生成
                 found_gt_keyfacts = False
                 found_gen_keyfacts = False
@@ -859,13 +939,23 @@ class ComprehensiveEvaluator:
                         found_gen_keyfacts = True
                 
                 # 收集 keyfacts 评估任务（用于并发评估）
-                if found_gt_keyfacts or found_gen_keyfacts:
+                if include_keyfacts and (found_gt_keyfacts or found_gen_keyfacts):
                     keyfacts_evaluation_tasks.append((
                         i,
                         ground_truth_keyfacts,
                         generated_keyfacts,
                         ground_truth_keyfacts_path,
                         generated_keyfacts_path
+                    ))
+
+                # 收集 informativeness 评估任务
+                if include_informativeness and original_text and popsci_text:
+                    informativeness_evaluation_tasks.append((
+                        i,
+                        original_text,
+                        popsci_text,
+                        ground_truth_keyfacts if found_gt_keyfacts else None,
+                        generated_keyfacts if found_gen_keyfacts else None
                     ))
             
             # 保存文档信息（稍后进行非 LLM 评估）
@@ -874,14 +964,16 @@ class ComprehensiveEvaluator:
                 'popsci_text': popsci_text,
                 'original_text': original_text,
                 'reference_text': reference_text,
-                'ground_truth_keyfacts': ground_truth_keyfacts if found_gt_keyfacts else None,
-                'generated_keyfacts': generated_keyfacts if found_gen_keyfacts else None,
-                'found_gt_keyfacts': found_gt_keyfacts,
-                'found_gen_keyfacts': found_gen_keyfacts
+                'ground_truth_keyfacts': ground_truth_keyfacts if (include_keyfacts or include_informativeness) and found_gt_keyfacts else None,
+                'generated_keyfacts': generated_keyfacts if (include_keyfacts or include_informativeness) and found_gen_keyfacts else None,
+                'found_gt_keyfacts': found_gt_keyfacts if (include_keyfacts or include_informativeness) else False,
+                'found_gen_keyfacts': found_gen_keyfacts if (include_keyfacts or include_informativeness) else False
             }
         
         # 第二阶段：批量并发评估 keyfacts precision/recall（使用 500 并发）
         doc_keyfacts_eval_map = {}  # {doc_index: keyfacts_evaluation_result}
+        doc_informativeness_eval_map = {} # {doc_index: informativeness_evaluation_result}
+
         if include_keyfacts and keyfacts_evaluation_tasks:
             print(f"\n🔑 开始批量评估 {len(keyfacts_evaluation_tasks)} 个 keyfacts precision/recall（并发数：500）...")
             
@@ -922,6 +1014,39 @@ class ComprehensiveEvaluator:
                     doc_keyfacts_eval_map[doc_idx] = eval_result
             
             print(f"✅ 完成批量评估 keyfacts precision/recall")
+
+        # Phase 2.5: 批量并发评估 Informativeness (QA)
+        if include_informativeness and informativeness_evaluation_tasks:
+            print(f"\n🧠 开始批量评估 {len(informativeness_evaluation_tasks)} 个 Informativeness (QA)（并发数：500）...")
+            
+            semaphore = asyncio.Semaphore(500)
+
+            async def evaluate_informativeness_with_semaphore(doc_idx, wiki, popsci, gt_kf, gen_kf):
+                 async with semaphore:
+                    try:
+                        if self.informativeness_evaluator:
+                            res = await self.informativeness_evaluator.evaluate_text_pair(
+                                wiki, popsci, wiki_keyfacts=gt_kf, popsci_keyfacts=gen_kf
+                            )
+                            return (doc_idx, res)
+                        return (doc_idx, {'score': 0.0, 'note': 'Evaluator not initialized'})
+                    except Exception as e:
+                        print(f"⚠️ 评估 informativeness 失败（文档 {doc_idx}）: {e}")
+                        return (doc_idx, {'score': 0.0, 'error': str(e)})
+
+            tasks = [evaluate_informativeness_with_semaphore(idx, w, p, gtk, genk) 
+                     for idx, w, p, gtk, genk in informativeness_evaluation_tasks]
+            
+            batch_size = 500
+            for batch_start in range(0, len(tasks), batch_size):
+                batch_end = min(batch_start + batch_size, len(tasks))
+                batch_tasks = tasks[batch_start:batch_end]
+                batch_results = await asyncio.gather(*batch_tasks)
+
+                for doc_idx, eval_result in batch_results:
+                    doc_informativeness_eval_map[doc_idx] = eval_result
+            
+            print(f"✅ 完成批量评估 Informativeness")
         
         # 第三阶段：逐个文档进行非 LLM 评估（coherence、simplicity、vividness）
         print(f"\n📊 开始逐个文档进行非 LLM 评估...")
@@ -944,7 +1069,9 @@ class ComprehensiveEvaluator:
                 doc_info['generated_keyfacts'],
                 None,
                 None,
-                include_keyfacts=False  # 跳过 keyfacts 评估（已在第二阶段完成）
+                include_keyfacts=False,  # 跳过 keyfacts 评估（已在第二阶段完成）
+                include_informativeness=False, # 跳过 informativeness (已在 2.5 阶段完成)
+                informativeness_result=doc_informativeness_eval_map.get(i) # 传入预计算结果
             )
             
             # 添加 keyfacts 评估结果（如果已评估）
@@ -961,6 +1088,14 @@ class ComprehensiveEvaluator:
                     'note': '未包含关键事实评估'
                 }
             
+            # 添加 informativeness 评估结果 (如果未包含在 evaluate_single_document 中)
+            if include_informativeness and i in doc_informativeness_eval_map:
+                # 理论上 evaluate_single_document 已经通过 informativeness_result 参数处理了
+                # 这里只是双重检查或处理异常情况
+                pass
+            elif include_informativeness and 'informativeness' not in result:
+                 result['informativeness'] = {'score': 0.0, 'note': 'Not evaluated'}
+
             # 添加文档标识和原始数据（支持嵌套字段）
             result['doc_id'] = get_nested_field(item, 'id', i)
             # 尝试从多个可能的字段获取标题
@@ -973,7 +1108,7 @@ class ComprehensiveEvaluator:
             result['original_data'] = item
             
             # 保存 keyfacts 数据（如果已生成或找到）
-            if include_keyfacts:
+            if include_keyfacts or include_informativeness:
                 result['ground_truth_keyfacts'] = doc_info['ground_truth_keyfacts']
                 result['generated_keyfacts'] = doc_info['generated_keyfacts']
             
@@ -1022,6 +1157,11 @@ class ComprehensiveEvaluator:
         emotionality_scores = [r['vividness'].get('emotionality', 0.0) for r in results]
         decorativeness_scores = [r['vividness'].get('decorativeness', 0.0) for r in results]
         
+        informativeness_scores = []
+        for r in results:
+            if 'informativeness' in r and 'score' in r['informativeness']:
+                informativeness_scores.append(r['informativeness']['score'])
+
         keyfacts_precisions = []
         keyfacts_recalls = []
         keyfacts_precisions_priority_1 = []
@@ -1071,6 +1211,7 @@ class ComprehensiveEvaluator:
             'coherence': calc_stats(coherence_scores),
             'simplicity': calc_stats(simplicity_scores),
             'vividness': calc_stats(vividness_scores),
+            'informativeness': calc_stats(informativeness_scores),
             'figurativeness': calc_stats(figurativeness_scores),
             'emotionality': calc_stats(emotionality_scores),
             'decorativeness': calc_stats(decorativeness_scores),
