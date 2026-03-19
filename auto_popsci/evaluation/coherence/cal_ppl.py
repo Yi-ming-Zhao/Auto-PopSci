@@ -1,64 +1,160 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-使用cal_ppl函数计算NatGeo Kids数据集的困惑度(Perplexity)
+Compute perplexity (PPL) for the NatGeo Kids dataset using the cal_ppl function.
 """
 
 import json
 import sys
 import os
 
-# 直接实现PPL计算，避免依赖问题模块
-USE_IMPORTED_PPL = False
-print("Using simple PPL implementation to avoid module dependencies")
+try:
+    import torch
+except ImportError:
+    torch = None
 
+class PPLEvaluator:
+    """Class to manage PPL Evaluation to avoid global state issues in multiprocessing"""
+    def __init__(self, device=None):
+        self.model = None
+        self.tokenizer = None
+        if torch is None:
+            self.device = device or "cpu"
+        else:
+            self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 全局变量缓存模型和分词器
+    def _load_model(self):
+        if torch is None:
+            raise RuntimeError("torch is not installed")
+        if self.model is None:
+            from transformers import GPT2LMHeadModel, GPT2Tokenizer
+            try:
+                self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2", local_files_only=True)
+                self.model = GPT2LMHeadModel.from_pretrained("gpt2", local_files_only=True)
+            except Exception:
+                self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+                self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+
+            self.model.to(self.device).eval()
+
+            # Set pad token
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+    def calculate_ppl(self, texts, batch_size=32):
+        if torch is None:
+            print("torch is not installed; returning default PPL values.")
+            if not isinstance(texts, list):
+                return 1000.0
+            return [1000.0] * len(texts)
+
+        self._load_model()
+        if not isinstance(texts, list):
+            texts = [texts]
+            
+        results = []
+        # Batch processing
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i : i + batch_size]
+            valid_batch_texts = [t for t in batch_texts if t and t.strip()]
+            
+            # Init with default
+            batch_results = [1000.0] * len(batch_texts)
+            
+            if not valid_batch_texts:
+                results.extend(batch_results)
+                continue
+                
+            try:
+                inputs = self.tokenizer(valid_batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=512).to(self.device)
+                with torch.no_grad():
+                    outputs = self.model(inputs.input_ids, attention_mask=inputs.attention_mask, labels=inputs.input_ids)
+                    logits = outputs.logits
+
+                # Shift logits
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = inputs.input_ids[..., 1:].contiguous()
+                shift_mask = inputs.attention_mask[..., 1:].contiguous()
+
+                loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+                flat_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                per_token_loss = flat_loss.view(shift_labels.size())
+                
+                # Mask
+                masked_loss = per_token_loss * shift_mask
+                sum_loss = masked_loss.sum(dim=1)
+                num_valid = shift_mask.sum(dim=1)
+                mean_loss = sum_loss / (num_valid + 1e-9)
+                ppls = torch.exp(mean_loss).cpu().numpy()
+                
+                # Map back avoiding index errors if some texts were empty (logic simplified here)
+                # Actually valid_batch_texts matches order of stripped texts.
+                # If we filter empty texts, mapping back is tricky.
+                # Let's keep empty strings but they result in 0 loss?
+                # Actually tokenizer handles empty string by return empty -> error.
+                # So we must map back.
+                
+                curr = 0
+                for idx, t in enumerate(batch_texts):
+                    if t and t.strip():
+                        batch_results[idx] = float(ppls[curr])
+                        curr += 1
+                        
+            except Exception as e:
+                print(f"PPL Batch Error: {e}")
+                
+            results.extend(batch_results)
+            
+        return results if len(texts) > 1 else results[0]
+
+# Global cache for model and tokenizer.
 _cached_model = None
 _cached_tokenizer = None
 
 def simple_cal_ppl(text):
     """
-    简单的困惑度计算实现
-    使用transformers库的GPT2模型
-    使用全局缓存避免重复加载模型
+    Simple perplexity calculation using GPT-2 from transformers.
+    Results are cached globally to avoid reloading the model.
     """
     global _cached_model, _cached_tokenizer
+
+    if torch is None:
+        print("torch is not installed; using default perplexity value.")
+        return 1000.0
     
     try:
         from transformers import GPT2LMHeadModel, GPT2Tokenizer
-        import torch
 
-        # 如果模型未缓存，则加载
+        # Load the model if not already cached.
         if _cached_model is None or _cached_tokenizer is None:
             try:
-                print("正在加载 GPT-2 模型...")
-                # 首先尝试使用本地缓存（避免网络问题）
+                print("Loading GPT-2 model...")
+                # First try the local cache (avoid network issues).
                 try:
                     _cached_tokenizer = GPT2Tokenizer.from_pretrained("gpt2", local_files_only=True)
                     _cached_model = GPT2LMHeadModel.from_pretrained("gpt2", local_files_only=True)
-                    print("✅ 从本地缓存加载 GPT-2 模型成功")
+                    print("Successfully loaded GPT-2 model from local cache")
                 except Exception as local_error:
-                    # 如果本地缓存不存在，尝试下载（可能会因网络问题失败）
-                    print(f"⚠️ 本地缓存加载失败，尝试下载: {local_error}")
+                    # If local cache is missing, attempt to download (network issues may occur).
+                    print(f"Local cache load failed; attempting download: {local_error}")
                     _cached_tokenizer = GPT2Tokenizer.from_pretrained("gpt2", local_files_only=False)
                     _cached_model = GPT2LMHeadModel.from_pretrained("gpt2", local_files_only=False)
-                    print("✅ 下载并加载 GPT-2 模型成功")
+                    print("Downloaded and loaded GPT-2 model successfully")
                 
-                _cached_model.eval()  # 设为评估模式
+                _cached_model.eval()  # Set to evaluation mode.
             except Exception as e:
-                print(f"⚠️ GPT-2 模型加载失败: {e}")
-                print("将跳过连贯性评估，使用默认困惑度值")
-                # 设置标记，避免后续重复尝试
+                print(f"Failed to load GPT-2 model: {e}")
+                print("Skipping coherence evaluation and using default perplexity value")
+                # Mark failure to avoid repeated attempts.
                 _cached_model = "FAILED"
                 _cached_tokenizer = "FAILED"
-                return 1000.0  # 返回一个默认的高值
+                return 1000.0  # Return a default high value.
         
-        # 如果之前加载失败，直接返回默认值
+        # If loading previously failed, return a default high value.
         if _cached_model == "FAILED" or _cached_tokenizer == "FAILED":
             return 1000.0
 
-        # 使用缓存的模型和分词器
+        # Use the cached model and tokenizer.
         inputs = _cached_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
         input_ids = inputs.input_ids
 
@@ -66,11 +162,11 @@ def simple_cal_ppl(text):
             outputs = _cached_model(input_ids, labels=input_ids)
             logits = outputs.logits
 
-        # 计算每个token的预测概率
+        # Compute per-token prediction probabilities.
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = input_ids[..., 1:].contiguous()
 
-        # 计算交叉熵损失
+        # Compute cross-entropy loss.
         loss = torch.nn.functional.cross_entropy(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1),
@@ -81,12 +177,12 @@ def simple_cal_ppl(text):
         ppl = torch.exp(nll).item()
         return ppl
     except Exception as e:
-        print(f"⚠️ 困惑度计算失败: {e}")
-        return 1000.0  # 返回一个默认的高值
+        print(f"Perplexity calculation failed: {e}")
+        return 1000.0  # Return a default high value.
 
 
 def load_natgeo_dataset(file_path):
-    """加载NatGeo Kids数据集"""
+    """Load the NatGeo Kids dataset."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -128,13 +224,13 @@ def load_natgeo_dataset(file_path):
 
 
 def calculate_text_ppl(text_list, text_type, max_samples=20):
-    """计算文本列表的困惑度，限制样本数量以加快处理速度"""
+    """Calculate perplexity for a list of texts, limiting samples to speed up processing."""
     if not text_list:
         return 0.0
 
     print(f"Starting to calculate perplexity for {text_type}...")
 
-    # 限制样本数量以提高处理速度
+    # Limit the number of samples to speed up processing.
     if len(text_list) > max_samples:
         text_list = text_list[:max_samples]
         print(f"   Limited to first {max_samples} samples for faster processing")
@@ -143,16 +239,16 @@ def calculate_text_ppl(text_list, text_type, max_samples=20):
     valid_texts = 0
 
     for i, text in enumerate(text_list):
-        if len(text.strip()) < 50:  # 跳过太短的文本
+        if len(text.strip()) < 50:  # Skip very short texts.
             continue
 
         try:
-            # 计算每个文本的困惑度
+            # Calculate perplexity for each text.
             ppl = simple_cal_ppl(text)
-            if ppl > 0 and ppl < 10000:  # 过滤异常值
+            if ppl > 0 and ppl < 10000:  # Filter out anomalous values.
                 ppl_scores.append(ppl)
                 valid_texts += 1
-                if (i + 1) % 5 == 0:  # 每5个文本输出一次进度
+                if (i + 1) % 5 == 0:  # Print progress every 5 texts.
                     print(f"   Processed {i+1}/{len(text_list)} texts, {valid_texts} valid")
         except Exception as e:
             print(f"Error calculating PPL for text {i+1}: {e}")
@@ -168,7 +264,7 @@ def calculate_text_ppl(text_list, text_type, max_samples=20):
 
 
 def interpret_ppl_score(ppl_score):
-    """解释困惑度分数"""
+    """Interpret a perplexity score."""
     if ppl_score < 50:
         return "Very Fluent"
     elif ppl_score < 100:
@@ -182,18 +278,18 @@ def interpret_ppl_score(ppl_score):
 
 
 def main():
-    """主函数"""
+    """Main function"""
     print("Calculating perplexity for NatGeo Kids dataset using cal_ppl function...")
 
-    # 数据集路径 - 使用项目根目录的相对路径
+    # Dataset path (relative to the project root).
     import os
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 从 auto_popsci/evaluation/coherence/ 回到项目根目录
+    # Ascend from auto_popsci/evaluation/coherence back to the project root.
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
     dataset_path = os.path.join(project_root, 'datasets', 'our_dataset', 'natgeo_kids', 'natgeo_wikipedia_glm.json')
     print(f"Looking for dataset at: {dataset_path}")
 
-    # 加载数据
+    # Load the dataset.
     natgeo_texts, wiki_texts = load_natgeo_dataset(dataset_path)
 
     if natgeo_texts is None or wiki_texts is None:
@@ -209,7 +305,7 @@ def main():
     print(f"   Wikipedia articles: {len(wiki_texts)}")
 
     try:
-        # 计算NatGeo文章的困惑度
+        # Calculate perplexity for NatGeo articles.
         print(f"\nCalculating perplexity for NatGeo articles...")
         natgeo_avg_ppl, natgeo_ppl_scores, natgeo_valid = calculate_text_ppl(
             natgeo_texts, "NatGeo articles", max_samples=15
@@ -220,7 +316,7 @@ def main():
             wiki_texts, "Wikipedia content", max_samples=15
         )
 
-        # 计算总体困惑度
+        # Calculate the overall perplexity.
         all_texts = natgeo_texts + wiki_texts
         print(f"\nCalculating perplexity for overall text...")
         overall_avg_ppl, overall_ppl_scores, overall_valid = calculate_text_ppl(
@@ -236,7 +332,7 @@ def main():
         print(f"   Wikipedia average PPL: {wiki_avg_ppl:.2f}")
         print(f"   Overall average PPL: {overall_avg_ppl:.2f}")
 
-        # PPL解释
+        # PPL interpretation.
         print(f"\nPPL Score Interpretation:")
         print(f"   <50: Very fluent")
         print(f"   50-100: Relatively fluent")
@@ -244,13 +340,13 @@ def main():
         print(f"   200-500: Less fluent")
         print(f"   >500: Very disfluent")
 
-        # 根据分数给出评估
+        # Provide fluency assessment based on scores.
         print(f"\nFluency Assessment:")
         print(f"   NatGeo Kids articles: {interpret_ppl_score(natgeo_avg_ppl)} (PPL: {natgeo_avg_ppl:.2f})")
         print(f"   Wikipedia content: {interpret_ppl_score(wiki_avg_ppl)} (PPL: {wiki_avg_ppl:.2f})")
         print(f"   Overall text: {interpret_ppl_score(overall_avg_ppl)} (PPL: {overall_avg_ppl:.2f})")
 
-        # 比较分析
+        # Comparative analysis.
         print(f"\nComparative Analysis:")
         if natgeo_avg_ppl < wiki_avg_ppl:
             ppl_diff = wiki_avg_ppl - natgeo_avg_ppl
@@ -261,7 +357,7 @@ def main():
         else:
             print(f"   NatGeo articles and Wikipedia content have similar fluency")
 
-        # 计算统计信息
+        # Compute statistical information.
         def calculate_stats(scores):
             if not scores:
                 return {"min": 0, "max": 0, "median": 0, "std": 0}
@@ -286,7 +382,7 @@ def main():
         print(f"   Wikipedia PPL: min={wiki_stats['min']:.2f}, max={wiki_stats['max']:.2f}, "
               f"median={wiki_stats['median']:.2f}, std={wiki_stats['std']:.2f}")
 
-        # 保存结果
+        # Save summary results.
         results = {
             'total_natgeo_texts': len(natgeo_texts),
             'total_wikipedia_texts': len(wiki_texts),
@@ -309,7 +405,7 @@ def main():
             'note': f'Limited to first 15-25 samples for faster processing'
         }
 
-        # 保存详细分数
+        # Save detailed scores.
         results['natgeo_ppl_scores'] = natgeo_ppl_scores
         results['wikipedia_ppl_scores'] = wiki_ppl_scores
         results['overall_ppl_scores'] = overall_ppl_scores

@@ -1,14 +1,14 @@
 """
 Vividness Evaluation Package
-用于评估文本生动性的综合模块
+A comprehensive suite for assessing textual vividness.
 
-包含三个子模块：
-- figurativeness: 比喻丰富度评估（基于MelBERT）
-- emotionality: 情感丰富度评估（基于VADER Sentiment）
-- decorativeness: 修饰性词汇丰富度评估
+Includes three submodules:
+- figurativeness: figurative richness evaluation (based on MelBERT)
+- emotionality: emotional richness evaluation (based on VADER Sentiment)
+- decorativeness: decorative vocabulary richness evaluation
 """
 
-# 安全导入各个评估器
+# Safely import each evaluator.
 try:
     from .figurativeness.figurativeness import FigurativenessEvaluator
 except ImportError as e:
@@ -29,25 +29,21 @@ except ImportError as e:
 
 
 class VividnessEvaluator:
-    """文本生动性综合评估器"""
+    """Composite vividness evaluator."""
 
-    def __init__(self, weights=None, melbert_path=None):
+    def __init__(self, weights=None, melbert_path=None, device=None):
         """
-        初始化生动性评估器
-
-        Args:
-            weights (dict): 各子模块权重，默认为等权重
-            melbert_path (str): MelBERT模型路径
+        Initialize the vividness evaluator.
         """
-        # 设置默认权重
+        # Set default weights.
         if weights is None:
             weights = {
-                'figurativeness': 0.4,  # 比喻丰富度权重
-                'emotionality': 0.3,     # 情感丰富度权重
-                'decorativeness': 0.3    # 修饰性丰富度权重
+                'figurativeness': 0.4,  # Weight for figurativeness.
+                'emotionality': 0.3,     # Weight for emotionality.
+                'decorativeness': 0.3    # Weight for decorativeness.
             }
 
-        # 验证权重
+        # Validate weight settings.
         if not all(0 <= w <= 1 for w in weights.values()):
             raise ValueError("Weights must be between 0 and 1")
 
@@ -55,13 +51,17 @@ class VividnessEvaluator:
             raise ValueError("Weights must sum to 1.0")
 
         self.weights = weights
+        self.device = device 
 
-        # 初始化子评估器
+        # Initialize the sub-evaluators.
         print("Initializing Vividness Evaluator...")
 
         print("- Loading Figurativeness Evaluator...")
         try:
+            self.figurativeness_evaluator = FigurativenessEvaluator(melbert_path, device=device)
+        except TypeError:
             self.figurativeness_evaluator = FigurativenessEvaluator(melbert_path)
+            if device: print(f"Warning: Device {device} passed but FigurativenessEvaluator didn't accept it.")
         except Exception as e:
             print(f"Warning: Failed to load Figurativeness Evaluator: {e}")
             self.figurativeness_evaluator = None
@@ -84,14 +84,14 @@ class VividnessEvaluator:
 
     def evaluate_text(self, text, return_components=False):
         """
-        评估单个文本的生动性
+        Evaluate the vividness of a single text.
 
         Args:
-            text (str): 输入文本
-            return_components (bool): 是否返回各子模块分数
+            text (str): Input text.
+            return_components (bool): Whether to return each component score.
 
         Returns:
-            float or dict: 生动性分数，或包含各子模块分数的字典
+            float or dict: The vividness score or detailed component scores.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             if return_components:
@@ -103,7 +103,7 @@ class VividnessEvaluator:
                 }
             return 0.0
 
-        # 计算各子模块分数
+        # Compute each component's score.
         component_scores = {}
 
         if self.figurativeness_evaluator is not None:
@@ -133,7 +133,7 @@ class VividnessEvaluator:
         else:
             component_scores['decorativeness'] = 0.0
 
-        # 计算加权总分
+        # Compute the weighted total vividness score.
         vividness_score = (
             component_scores['figurativeness'] * self.weights['figurativeness'] +
             component_scores['emotionality'] * self.weights['emotionality'] +
@@ -151,14 +151,14 @@ class VividnessEvaluator:
 
     def evaluate_texts(self, texts, return_components=False):
         """
-        批量评估文本的生动性
+        Evaluate multiple texts' vividness scores.
 
         Args:
-            texts (list): 文本列表
-            return_components (bool): 是否返回各子模块分数
+            texts (list): A list of texts.
+            return_components (bool): Whether to return component-level scores.
 
         Returns:
-            list: 生动性分数列表，或包含各子模块分数的字典列表
+            list: List of vividness scores or component dicts.
         """
         if not isinstance(texts, list):
             texts = [texts]
@@ -172,13 +172,13 @@ class VividnessEvaluator:
 
     def get_detailed_analysis(self, text):
         """
-        获取详细的生动性分析
+        Get a detailed vividness analysis for a text.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            dict: 详细分析结果
+            dict: Detailed analysis results.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return {
@@ -193,7 +193,7 @@ class VividnessEvaluator:
                 'weights': self.weights
             }
 
-        # 获取各子模块详细分数
+        # Gather detailed component scores.
         component_details = {}
 
         if self.figurativeness_evaluator is not None:
@@ -257,7 +257,7 @@ class VividnessEvaluator:
                 'interpretation': 'Evaluator not available'
             }
 
-        # 计算总分
+    # Calculate the total vividness score.
         component_scores = {k: v['score'] for k, v in component_details.items()}
         vividness_score = (
             component_scores['figurativeness'] * self.weights['figurativeness'] +
@@ -265,7 +265,7 @@ class VividnessEvaluator:
             component_scores['decorativeness'] * self.weights['decorativeness']
         )
 
-        # 生成整体解释
+    # Generate the overall interpretation.
         interpretation = self.get_score_interpretation(vividness_score)
 
         return {
@@ -278,35 +278,35 @@ class VividnessEvaluator:
 
     def get_score_interpretation(self, score):
         """
-        获取生动性分数的解释
+        Translate a vividness score into an interpretation.
 
         Args:
-            score (float): 生动性分数
+            score (float): vividness score
 
         Returns:
-            str: 分数解释
+            str: English description of the score
         """
         if score >= 0.8:
-            return "极高生动性"
+            return "Extremely vivid"
         elif score >= 0.6:
-            return "高生动性"
+            return "High vividness"
         elif score >= 0.4:
-            return "中等生动性"
+            return "Moderate vividness"
         elif score >= 0.2:
-            return "低生动性"
+            return "Low vividness"
         else:
-            return "极少生动性"
+            return "Minimal vividness"
 
     def compare_texts(self, text1, text2):
         """
-        比较两个文本的生动性
+        Compare the vividness of two texts.
 
         Args:
-            text1 (str): 第一个文本
-            text2 (str): 第二个文本
+            text1 (str): first text
+            text2 (str): second text
 
         Returns:
-            dict: 比较结果
+            dict: comparison results
         """
         analysis1 = self.get_detailed_analysis(text1)
         analysis2 = self.get_detailed_analysis(text2)
@@ -314,11 +314,11 @@ class VividnessEvaluator:
         score_diff = analysis1['vividness_score'] - analysis2['vividness_score']
 
         if abs(score_diff) < 0.05:
-            comparison = "两个文本的生动性相似"
+            comparison = "Both texts have similar vividness"
         elif score_diff > 0:
-            comparison = f"文本1的生动性高于文本2（差距: {score_diff:.3f}）"
+            comparison = f"Text 1 is more vivid than Text 2 (difference: {score_diff:.3f})"
         else:
-            comparison = f"文本2的生动性高于文本1（差距: {abs(score_diff):.3f}）"
+            comparison = f"Text 2 is more vivid than Text 1 (difference: {abs(score_diff):.3f})"
 
         return {
             'text1_analysis': analysis1,
@@ -330,11 +330,11 @@ class VividnessEvaluator:
 
 
 def main():
-    """测试函数"""
-    # 创建评估器
+    """Sample driver for the vividness evaluator."""
+    # Create the evaluator.
     evaluator = VividnessEvaluator()
 
-    # 测试文本
+    # Test text.
     test_texts = [
         "The sun is a golden coin in the sky.",
         "The system processes data efficiently.",

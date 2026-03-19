@@ -1,0 +1,228 @@
+{
+  "dataset_path": "model_outputs/qwen/adult_without_finetune.json",
+  "total_documents": 1,
+  "evaluated_documents": 1,
+  "results": [
+    {
+      "doc_id": 0,
+      "model_name": "qwen3-8b-without-finetune",
+      "source": "sciencealert",
+      "content_relevance_score": 9,
+      "popsci_title": "A Type of Fiber Could Have Weight Loss Benefits Similar to Ozempic",
+      "popsci_url": "https://www.sciencealert.com/a-type-of-fiber-could-have-weight-loss-benefits-similar-to-ozempic",
+      "wiki_title": "Beta-glucan",
+      "wiki_url": "https://en.wikipedia.org/wiki/Beta-glucan",
+      "model_title": "The Hidden Power of Beta-Glucan: Nature's Secret Weapon Against Disease",
+      "simplicity_fkgl_score": 11.787841105354058,
+      "simplicity_interpretation": "Relatively simple (middle school level)",
+      "coherence_ppl_score": 11.885919570922852,
+      "coherence_interpretation": "Very fluent",
+      "vividness_score": 0.3663360014680742,
+      "figurativeness": 0.26378047986066183,
+      "emotionality": 0.271,
+      "decorativeness": 0.5984126984126984,
+      "keyfacts_precision": 0.75,
+      "keyfacts_recall": 0.35294117647058826,
+      "keyfacts_precision_by_priority": {
+        "priority_1": 1.0,
+        "priority_2": 0.75,
+        "priority_3": 0.0
+      },
+      "keyfacts_recall_by_priority": {
+        "priority_1": 0.75,
+        "priority_2": 0.375,
+        "priority_3": 0.0
+      }
+    }
+  ],
+  "statistics": {
+    "coherence": {
+      "mean": 11.885919570922852,
+      "min": 11.885919570922852,
+      "max": 11.885919570922852,
+      "count": 1,
+      "metrics": {
+        "ppl": {
+          "mean": 11.885919570922852,
+          "min": 11.885919570922852,
+          "max": 11.885919570922852,
+          "count": 1
+        },
+        "llm_score": {}
+      }
+    },
+    "simplicity": {
+      "mean": 11.787841105354058,
+      "min": 11.787841105354058,
+      "max": 11.787841105354058,
+      "count": 1,
+      "metrics": {
+        "fkgl": {
+          "mean": 11.787841105354058,
+          "min": 11.787841105354058,
+          "max": 11.787841105354058,
+          "count": 1
+        }
+      }
+    },
+    "vividness": {
+      "mean": 0.3663360014680742,
+      "min": 0.3663360014680742,
+      "max": 0.3663360014680742,
+      "count": 1,
+      "metrics": {
+        "overall": {
+          "mean": 0.3663360014680742,
+          "min": 0.3663360014680742,
+          "max": 0.3663360014680742,
+          "count": 1
+        },
+        "figurativeness": {
+          "mean": 0.26378047986066183,
+          "min": 0.26378047986066183,
+          "max": 0.26378047986066183,
+          "count": 1
+        },
+        "emotionality": {
+          "mean": 0.271,
+          "min": 0.271,
+          "max": 0.271,
+          "count": 1
+        },
+        "decorativeness": {
+          "mean": 0.5984126984126984,
+          "min": 0.5984126984126984,
+          "max": 0.5984126984126984,
+          "count": 1
+        }
+      }
+    },
+    "informativeness": {
+      "metrics": {
+        "qa_score": {}
+      }
+    },
+    "figurativeness": {
+      "mean": 0.26378047986066183,
+      "min": 0.26378047986066183,
+      "max": 0.26378047986066183,
+      "count": 1
+    },
+    "emotionality": {
+      "mean": 0.271,
+      "min": 0.271,
+      "max": 0.271,
+      "count": 1
+    },
+    "decorativeness": {
+      "mean": 0.5984126984126984,
+      "min": 0.5984126984126984,
+      "max": 0.5984126984126984,
+      "count": 1
+    },
+    "keyfacts_precision": {
+      "mean": 0.75,
+      "min": 0.75,
+      "max": 0.75,
+      "count": 1,
+      "metrics": {
+        "overall": {
+          "mean": 0.75,
+          "min": 0.75,
+          "max": 0.75,
+          "count": 1
+        },
+        "priority_1": {
+          "mean": 1.0,
+          "min": 1.0,
+          "max": 1.0,
+          "count": 1
+        },
+        "priority_2": {
+          "mean": 0.75,
+          "min": 0.75,
+          "max": 0.75,
+          "count": 1
+        },
+        "priority_3": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "count": 1
+        }
+      }
+    },
+    "keyfacts_recall": {
+      "mean": 0.35294117647058826,
+      "min": 0.35294117647058826,
+      "max": 0.35294117647058826,
+      "count": 1,
+      "metrics": {
+        "overall": {
+          "mean": 0.35294117647058826,
+          "min": 0.35294117647058826,
+          "max": 0.35294117647058826,
+          "count": 1
+        },
+        "priority_1": {
+          "mean": 0.75,
+          "min": 0.75,
+          "max": 0.75,
+          "count": 1
+        },
+        "priority_2": {
+          "mean": 0.375,
+          "min": 0.375,
+          "max": 0.375,
+          "count": 1
+        },
+        "priority_3": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "count": 1
+        }
+      }
+    },
+    "keyfacts_precision_by_priority": {
+      "priority_1": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "count": 1
+      },
+      "priority_2": {
+        "mean": 0.75,
+        "min": 0.75,
+        "max": 0.75,
+        "count": 1
+      },
+      "priority_3": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "count": 1
+      }
+    },
+    "keyfacts_recall_by_priority": {
+      "priority_1": {
+        "mean": 0.75,
+        "min": 0.75,
+        "max": 0.75,
+        "count": 1
+      },
+      "priority_2": {
+        "mean": 0.375,
+        "min": 0.375,
+        "max": 0.375,
+        "count": 1
+      },
+      "priority_3": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "count": 1
+      }
+    }
+  }
+}

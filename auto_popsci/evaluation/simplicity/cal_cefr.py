@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-使用cefrpy包计算文本的CEFR分级
-CEFR (Common European Framework of Reference) 欧洲语言共同参考框架
+Compute CEFR (Common European Framework of Reference) levels using the cefrpy package.
 """
 
 import json
@@ -15,73 +14,73 @@ try:
     from cefrpy import CEFRAnalyzer
     CEFRPY_AVAILABLE = True
 except ImportError:
-    print("⚠️ cefrpy库未安装，请运行: pip install cefrpy")
+    print("cefrpy is not installed; please run: pip install cefrpy")
     CEFRPY_AVAILABLE = False
+    # Define a stub class to avoid type hints when cefrpy is unavailable.
+    class CEFRAnalyzer:
+        pass
 
 try:
     import nltk
     from nltk.tokenize import word_tokenize
     from nltk.tag import pos_tag
+    from auto_popsci.utils.utils import download_nltk_data
     NLTK_AVAILABLE = True
-    # 尝试下载必要的nltk数据
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        print("📥 下载nltk数据...")
-        nltk.download('punkt', quiet=True)
-        nltk.download('averaged_perceptron_tagger', quiet=True)
+    # Download required NLTK data.
+    download_nltk_data('punkt')
+    download_nltk_data('averaged_perceptron_tagger')
 except ImportError:
-    print("⚠️ nltk库未安装，将使用简单的分词方法")
-    print("   建议安装: pip install nltk")
+    print("NLTK is not installed; falling back to a simple tokenizer.")
+    print("   Optional: pip install nltk")
     NLTK_AVAILABLE = False
 
 
 def get_cefr_level_name(level: float) -> str:
-    """将CEFR数值等级转换为等级名称"""
+    """Convert a numeric CEFR level to a descriptive label."""
     if level < 1.0:
-        return "A1 (入门级)"
+        return "A1 (Beginner)"
     elif level < 2.0:
-        return "A2 (基础级)"
+        return "A2 (Elementary)"
     elif level < 3.0:
-        return "B1 (进阶级)"
+        return "B1 (Intermediate)"
     elif level < 4.0:
-        return "B2 (高阶级)"
+        return "B2 (Upper Intermediate)"
     elif level < 5.0:
-        return "C1 (流利级)"
+        return "C1 (Fluent)"
     else:
-        return "C2 (精通级)"
+        return "C2 (Proficient)"
 
 
 def simple_tokenize(text: str) -> List[str]:
-    """简单的分词方法（当nltk不可用时使用）"""
-    # 移除标点符号，转换为小写，分割单词
+    """Simple tokenizer used when NLTK is unavailable."""
+    # Remove punctuation, lowercase, and split into words.
     text = re.sub(r'[^\w\s]', ' ', text)
     words = text.lower().split()
     return words
 
 
 def get_pos_tag_simple(word: str) -> str:
-    """简单的词性标注（当nltk不可用时使用）"""
-    # 这是一个非常简化的词性标注，实际应该使用nltk
-    # 默认返回最常见的词性
-    return "NN"  # 名词
+    """Simple POS tagger fallback for when NLTK is unavailable."""
+    # This is a highly simplified POS tagger; prefer NLTK when available.
+    # Default to the most common POS tag.
+    return "NN"  # Noun.
 
 
 def tokenize_and_tag(text: str) -> List[Tuple[str, str]]:
     """
-    对文本进行分词和词性标注
-    
+    Tokenize and POS tag the text.
+
     Returns:
-        (单词, 词性标签) 元组列表
+        List of (word, tag) tuples.
     """
     if NLTK_AVAILABLE:
         try:
             words = word_tokenize(text)
             tagged = pos_tag(words)
-            # 转换nltk的词性标签为Penn Treebank格式（cefrpy需要的格式）
+            # Convert NLTK POS tags to the Penn Treebank format required by cefrpy.
             return [(word.lower(), tag) for word, tag in tagged if word.isalpha()]
         except Exception as e:
-            print(f"⚠️ nltk处理出错，使用简单方法: {e}")
+            print(f"NLTK processing failed; using fallback tokenizer: {e}")
             words = simple_tokenize(text)
             return [(word, get_pos_tag_simple(word)) for word in words]
     else:
@@ -91,64 +90,67 @@ def tokenize_and_tag(text: str) -> List[Tuple[str, str]]:
 
 def calculate_text_cefr(text: str, analyzer: CEFRAnalyzer) -> Dict:
     """
-    计算单个文本的CEFR等级
-    
+    Calculate the CEFR level for a single text.
+
     Args:
-        text: 要分析的文本
-        analyzer: CEFRAnalyzer实例
-    
+        text: The text to analyze.
+        analyzer: CEFRAnalyzer instance.
+
     Returns:
-        包含CEFR等级信息的字典
+        Dict containing CEFR level metadata.
     """
     if not text or not text.strip():
         return {
             'level': None,
             'level_name': 'N/A',
-            'error': '文本为空',
+            'error': 'text is empty',
             'word_count': 0,
             'analyzed_words': 0
         }
     
     try:
-        # 分词和词性标注
+        # Tokenize and POS tag the text.
         word_pos_pairs = tokenize_and_tag(text)
         
         if not word_pos_pairs:
             return {
                 'level': None,
                 'level_name': 'N/A',
-                'error': '无法分词',
+                'error': 'unable to tokenize text',
                 'word_count': 0,
                 'analyzed_words': 0
             }
         
-        # 计算每个单词的CEFR等级
+        # Compute the CEFR level for each word.
         levels = []
         analyzed_count = 0
         
         for word, pos_tag in word_pos_pairs:
-            # 尝试获取单词在该词性下的CEFR等级
-            level = analyzer.get_word_pos_level_float(word, pos_tag)
-            if level is not None:
-                levels.append(level)
-                analyzed_count += 1
-            else:
-                # 如果特定词性下没有，尝试获取平均等级
-                avg_level = analyzer.get_average_word_level_float(word)
-                if avg_level is not None:
-                    levels.append(avg_level)
+            try:
+                # Try to get the CEFR level for the word with this POS tag.
+                level = analyzer.get_word_pos_level_float(word, pos_tag)
+                if level is not None:
+                    levels.append(level)
                     analyzed_count += 1
+                else:
+                    # If no match for the specific POS, try the average level.
+                    avg_level = analyzer.get_average_word_level_float(word)
+                    if avg_level is not None:
+                        levels.append(avg_level)
+                        analyzed_count += 1
+            except Exception:
+                continue
         
         if not levels:
             return {
                 'level': None,
                 'level_name': 'N/A',
-                'error': '没有找到任何单词的CEFR等级',
+                'error': 'no CEFR level found for any word',
                 'word_count': len(word_pos_pairs),
                 'analyzed_words': 0
             }
         
-        # 计算平均CEFR等级
+        # Compute the average CEFR level.
         avg_level = sum(levels) / len(levels)
         
         return {
@@ -172,14 +174,14 @@ def calculate_text_cefr(text: str, analyzer: CEFRAnalyzer) -> Dict:
 
 def calculate_corpus_cefr(texts: List[str], analyzer: CEFRAnalyzer) -> Dict:
     """
-    计算文本集合的平均CEFR等级
-    
+    Calculate corpus-level CEFR statistics.
+
     Args:
-        texts: 文本列表
-        analyzer: CEFRAnalyzer实例
-    
+        texts: List of texts.
+        analyzer: CEFRAnalyzer instance.
+
     Returns:
-        包含统计信息的字典
+        Dict containing summary statistics.
     """
     if not texts:
         return {
@@ -228,14 +230,14 @@ def calculate_corpus_cefr(texts: List[str], analyzer: CEFRAnalyzer) -> Dict:
 
 def load_articles_from_json(file_path: str, content_field: str = 'content') -> List[str]:
     """
-    从JSON文件加载文章内容
+    Load article contents from a JSON file.
     
     Args:
-        file_path: JSON文件路径
-        content_field: 内容字段名，默认为'content'
+        file_path: Path to the JSON file.
+        content_field: Field name containing the text (default 'content').
     
     Returns:
-        文章内容列表
+        List[str]: Extracted article texts.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -255,104 +257,103 @@ def load_articles_from_json(file_path: str, content_field: str = 'content') -> L
         
         return articles
     except FileNotFoundError:
-        print(f"❌ 文件不存在: {file_path}")
+        print(f"File not found: {file_path}")
         return []
     except Exception as e:
-        print(f"❌ 加载数据时出错: {e}")
+        print(f"Error loading articles: {e}")
         return []
 
 
 def main():
-    """主函数"""
+    """Main entry point."""
     if not CEFRPY_AVAILABLE:
-        print("❌ cefrpy库未安装，无法继续")
-        print("   请运行: pip install cefrpy")
+        print("cefrpy is not installed; cannot continue.")
+        print("   Please run: pip install cefrpy")
         return
     
-    print("🔧 使用cefrpy计算文本CEFR分级...")
+    print("Computing CEFR levels using cefrpy...")
     
-    # 初始化CEFR分析器
+    # Initialize the CEFR analyzer.
     try:
         analyzer = CEFRAnalyzer()
-        print("✅ CEFR分析器初始化成功")
+        print("CEFR analyzer initialized successfully.")
     except Exception as e:
-        print(f"❌ CEFR分析器初始化失败: {e}")
+        print(f"Failed to initialize CEFR analyzer: {e}")
         return
     
-    # 示例1: 分析单个文本
+    # Example 1: analyze a single text.
     print("\n" + "="*60)
-    print("示例1: 分析单个文本")
+    print("Example 1: Analyze a single text sample")
     print("="*60)
     
     sample_text = "The sun is very bright today. It makes me happy."
-    print(f"文本: {sample_text}")
+    print(f"Text: {sample_text}")
     result = calculate_text_cefr(sample_text, analyzer)
-    print(f"CEFR等级: {result['level']:.2f}")
-    print(f"CEFR等级名称: {result['level_name']}")
+    print(f"CEFR level: {result['level']:.2f}")
+    print(f"CEFR level name: {result['level_name']}")
     
-    # 示例2: 从JSON文件加载并分析
+    # Example 2: load and analyze from a JSON file.
     print("\n" + "="*60)
-    print("示例2: 分析JSON文件中的文章")
+    print("Example 2: Analyze articles from a JSON file")
     print("="*60)
     
-    # 检查是否有命令行参数指定文件路径
+    # Check for CLI-specified file paths.
     if len(sys.argv) > 1:
         json_file = sys.argv[1]
     else:
-        # 默认使用nasa_kids_articles.json
         json_file = 'datasets/our_dataset/nasa_kids_articles.json'
     
     if os.path.exists(json_file):
-        print(f"📂 加载文件: {json_file}")
+        print(f"Loading file: {json_file}")
         articles = load_articles_from_json(json_file)
         
         if articles:
-            print(f"✅ 成功加载 {len(articles)} 篇文章")
+            print(f"Successfully loaded {len(articles)} articles.")
             
-            # 计算每篇文章的CEFR等级
-            print("\n📊 开始计算CEFR等级...")
+            # Calculate each article's CEFR level.
+            print("\nStarting CEFR level computation...")
             results = []
-            for i, article in enumerate(articles[:10], 1):  # 只分析前10篇作为示例
+            for i, article in enumerate(articles[:10], 1):
                 result = calculate_text_cefr(article, analyzer)
                 results.append({
                     'article_index': i,
                     'text_length': len(article),
                     **result
                 })
-                print(f"文章 {i}: CEFR等级 = {result['level']:.2f} ({result['level_name']})")
+                level_display = result['level'] if result['level'] is not None else float('nan')
+                print(f"Article {i}: CEFR level = {level_display:.2f} ({result['level_name']})")
             
-            # 计算整体统计
+            # Compute overall statistics.
             print("\n" + "="*60)
-            print("整体统计")
+            print("Corpus statistics")
             print("="*60)
             corpus_stats = calculate_corpus_cefr(articles, analyzer)
-            print(f"总文章数: {corpus_stats['total_texts']}")
-            print(f"有效文章数: {corpus_stats['valid_texts']}")
-            print(f"平均CEFR等级: {corpus_stats['average_level']:.2f}")
-            print(f"平均CEFR等级名称: {corpus_stats['average_level_name']}")
-            print(f"最低CEFR等级: {corpus_stats['min_level']:.2f} ({corpus_stats['min_level_name']})")
-            print(f"最高CEFR等级: {corpus_stats['max_level']:.2f} ({corpus_stats['max_level_name']})")
+            print(f"Total articles: {corpus_stats['total_texts']}")
+            print(f"Valid articles: {corpus_stats['valid_texts']}")
+            print(f"Average CEFR level: {corpus_stats['average_level']:.2f}")
+            print(f"Average CEFR level name: {corpus_stats['average_level_name']}")
+            print(f"Minimum CEFR level: {corpus_stats['min_level']:.2f} ({corpus_stats['min_level_name']})")
+            print(f"Maximum CEFR level: {corpus_stats['max_level']:.2f} ({corpus_stats['max_level_name']})")
             
-            # 保存结果
+            # Save the results.
             output_file = 'cefr_results.json'
             output_data = {
                 'file_analyzed': json_file,
                 'corpus_statistics': corpus_stats,
-                'sample_results': results[:10]  # 保存前10篇的详细结果
+                'sample_results': results[:10]
             }
             
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(output_data, f, indent=2, ensure_ascii=False)
             
-            print(f"\n💾 详细结果已保存到: {output_file}")
+            print(f"\nDetailed results saved to: {output_file}")
         else:
-            print("⚠️ 文件中没有找到有效的文章内容")
+            print("No valid articles found in the file.")
     else:
-        print(f"⚠️ 文件不存在: {json_file}")
-        print("   使用方法: python cal_cefr.py <json_file_path>")
-        print("   或直接运行脚本，将使用默认文件路径")
+        print(f"File not found: {json_file}")
+        print("   Usage: python cal_cefr.py <json_file_path>")
+        print("   Running without arguments will use the default file path.")
 
 
 if __name__ == "__main__":
     main()
-

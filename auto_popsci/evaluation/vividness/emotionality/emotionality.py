@@ -1,6 +1,6 @@
 """
 Emotionality Evaluator using VADER Sentiment
-用于评估文本情感丰富度的模块
+Module for assessing textual emotional richness.
 
 Usage:
     evaluator = EmotionalityEvaluator()
@@ -24,39 +24,39 @@ except ImportError:
 
 
 class EmotionalityEvaluator:
-    """使用VADER Sentiment评估文本情感丰富度的类"""
+    """Evaluate a text's emotional richness using VADER Sentiment."""
 
     def __init__(self):
-        """初始化情感性评估器"""
+        """Initialize the emotionality evaluator."""
         self.analyzer = SentimentIntensityAnalyzer()
 
     def _calculate_emotionality_score(self, text):
         """
-        计算情感丰富度分数
+        Compute the emotionality score.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            float: 情感丰富度分数 (0-1)
+            float: Emotionality score (0-1).
         """
-        # 使用VADER分析情感
+        # Use VADER to analyze sentiment.
         scores = self.analyzer.polarity_scores(text)
 
-        # 直接使用pos + neg作为情感综合得分
+        # Use pos + neg as the combined emotionality score.
         emotionality_score = scores['pos'] + scores['neg']
 
         return emotionality_score
 
     def evaluate_text(self, text):
         """
-        评估单个文本的情感丰富度
+        Evaluate the emotionality of a single text.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            float: 情感丰富度分数 (0-1)，越高表示情感越丰富
+            float: Emotionality score (0-1); higher equals richer emotion.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return 0.0
@@ -65,13 +65,13 @@ class EmotionalityEvaluator:
 
     def evaluate_texts(self, texts):
         """
-        批量评估文本的情感丰富度
+        Evaluate multiple texts for emotionality.
 
         Args:
-            texts (list): 文本列表
+            texts (list): List of texts.
 
         Returns:
-            list: 情感丰富度分数列表
+            list: Emotionality scores.
         """
         if not isinstance(texts, list):
             texts = [texts]
@@ -85,13 +85,13 @@ class EmotionalityEvaluator:
 
     def get_detailed_scores(self, text):
         """
-        获取详细的情感分析分数
+        Get detailed emotionality scores.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            dict: 详细分数
+            dict: Detailed score breakdown.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return {
@@ -99,10 +99,10 @@ class EmotionalityEvaluator:
                 'vader_scores': {'compound': 0.0, 'pos': 0.0, 'neg': 0.0, 'neu': 1.0}
             }
 
-        # 获取VADER分数
+        # Retrieve VADER scores.
         vader_scores = self.analyzer.polarity_scores(text)
 
-        # 情感丰富度分数 = pos + neg
+        # Emotionality score = pos + neg.
         emotionality_score = vader_scores['pos'] + vader_scores['neg']
 
         return {
@@ -112,30 +112,30 @@ class EmotionalityEvaluator:
 
     def get_score_interpretation(self, score):
         """
-        获取分数的解释
+        Interpret an emotionality score.
 
         Args:
-            score (float): 情感丰富度分数
+            score (float): Emotionality score.
 
         Returns:
-            str: 分数解释
+            str: Textual interpretation.
         """
         if score >= 0.7:
-            return "高情感丰富度"
+            return "High emotional richness"
         elif score >= 0.4:
-            return "中等情感丰富度"
+            return "Moderate emotional richness"
         elif score >= 0.2:
-            return "低情感丰富度"
+            return "Mild emotional richness"
         else:
-            return "极少情感表达"
+            return "Minimal emotional expression"
 
 
 def main():
-    """测试函数"""
-    # 创建评估器
+    """Demo runner for the emotionality evaluator."""
+    # Create the evaluator.
     evaluator = EmotionalityEvaluator()
 
-    # 测试文本
+    # Test texts.
     test_texts = [
         "I love this beautiful sunset! It's absolutely amazing and makes me feel incredibly happy.",
         "The data shows a 15% increase in quarterly revenue.",

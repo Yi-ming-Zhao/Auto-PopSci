@@ -1,9 +1,9 @@
 """
 Decorativeness Evaluator
-用于评估文本修饰性词汇丰富度的模块
+Module for assessing decorative vocabulary richness leveraging only POS tagging.
 
-本模块仅使用NLTK词性标注（POS tagging）来识别修饰性词汇（形容词和副词），
-不使用预定义词表，确保评估结果更加客观和通用。
+This evaluator relies on NLTK POS tagging to detect adjectives and adverbs without
+predefined lexicons, maintaining objectivity and broader applicability.
 
 Usage:
     evaluator = DecorativenessEvaluator()
@@ -20,7 +20,7 @@ from collections import defaultdict
 from tqdm import tqdm
 
 def _check_nltk_data(nltk_module, data_name):
-    """检查NLTK数据是否已下载"""
+    """Check whether the required NLTK data package exists."""
     try:
         nltk_module.data.find(data_name)
         return True
@@ -31,42 +31,30 @@ try:
     import nltk
     from nltk import pos_tag, word_tokenize
     from nltk.corpus import wordnet
+    from auto_popsci.utils.utils import download_nltk_data
     
-    # 检查并下载punkt（分词器）
-    if not _check_nltk_data(nltk, 'tokenizers/punkt'):
-        nltk.download('punkt', quiet=False)
-    
-    # 检查并下载词性标注器
-    if not _check_nltk_data(nltk, 'taggers/averaged_perceptron_tagger'):
-        nltk.download('averaged_perceptron_tagger', quiet=False)
-        nltk.download('averaged_perceptron_tagger_eng', quiet=False)
-    
-    # 检查并下载WordNet（虽然当前未使用，但保留以备将来使用）
-    if not _check_nltk_data(nltk, 'corpora/wordnet'):
-        nltk.download('wordnet', quiet=False)
+    # Ensure required NLTK data is downloaded.
+    download_nltk_data('punkt')
+    download_nltk_data('averaged_perceptron_tagger')
+    download_nltk_data('averaged_perceptron_tagger_eng')
+    # download_nltk_data('wordnet') # User requested to skip wordnet
     
     NLTK_AVAILABLE = True
 except ImportError:
-    print("Installing NLTK...")
-    import subprocess
-    subprocess.check_call(["pip", "install", "nltk"])
+    print("NLTK not found. Attempting to install...")
     try:
+        import subprocess
+        subprocess.check_call(["pip", "install", "nltk"])
         import nltk
         from nltk import pos_tag, word_tokenize
-        from nltk.corpus import wordnet
+        # from nltk.corpus import wordnet # User requested to skip
+        from auto_popsci.utils.utils import download_nltk_data
         
-        # 检查并下载punkt（分词器）
-        if not _check_nltk_data(nltk, 'tokenizers/punkt'):
-            nltk.download('punkt', quiet=False)
-        
-        # 检查并下载词性标注器
-        if not _check_nltk_data(nltk, 'taggers/averaged_perceptron_tagger'):
-            nltk.download('averaged_perceptron_tagger', quiet=False)
-            nltk.download('averaged_perceptron_tagger_eng', quiet=False)
-        
-        # 检查并下载WordNet
-        if not _check_nltk_data(nltk, 'corpora/wordnet'):
-            nltk.download('wordnet', quiet=False)
+        # Ensure required NLTK data is downloaded.
+        download_nltk_data('punkt')
+        download_nltk_data('averaged_perceptron_tagger')
+        download_nltk_data('averaged_perceptron_tagger_eng')
+        # download_nltk_data('wordnet')
         
         NLTK_AVAILABLE = True
     except Exception as e:
@@ -76,72 +64,72 @@ except ImportError:
 
 class DecorativenessEvaluator:
     """
-    评估文本修饰性词汇丰富度的类
-    
-    仅基于NLTK词性标注识别修饰性词汇：
-    - 形容词：JJ（原级）、JJR（比较级）、JJS（最高级）
-    - 副词：RB（原级）、RBR（比较级）、RBS（最高级）
+    Decorativeness evaluator using NLTK POS tagging.
+
+    It detects decorative words via POS tags:
+    - adjectives: JJ, JJR, JJS
+    - adverbs: RB, RBR, RBS
     """
 
     def __init__(self):
-        """初始化修饰性评估器（仅使用NLTK词性标注，不使用预定义词表）"""
-        # 修饰性词性标签（Penn Treebank POS tags）
+        """Initialize the decorativeness evaluator using POS tagging only."""
+        # Decorative POS tags (Penn Treebank).
         self.decorative_pos_tags = {
-            'adjectives': {'JJ', 'JJR', 'JJS'},  # 形容词：原级、比较级、最高级
-            'adverbs': {'RB', 'RBR', 'RBS'},    # 副词：原级、比较级、最高级
+            'adjectives': {'JJ', 'JJR', 'JJS'},  # Adjectives: base, comparative, superlative.
+            'adverbs': {'RB', 'RBR', 'RBS'},    # Adverbs: base, comparative, superlative.
         }
 
     def _tokenize_text(self, text):
         """
-        分词
+        Tokenize the input text.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            list: 词汇列表
+            list: List of tokens.
         """
         if NLTK_AVAILABLE:
             return word_tokenize(text.lower())
         else:
-            # 简单分词作为fallback
+            # Simple tokenization fallback.
             return re.findall(r'\b\w+\b', text.lower())
 
     def _pos_tag_words(self, words):
         """
-        词性标注
+        Tag tokens with part-of-speech labels.
 
         Args:
-            words (list): 词汇列表
+            words (list): List of tokens.
 
         Returns:
-            list: (词, 词性标签) 元组列表
+            list: List of (word, tag) tuples.
         """
         if NLTK_AVAILABLE:
             return pos_tag(words)
         else:
-            # 简单的词性标注作为fallback
+            # Simple POS tagging fallback.
             tagged = []
             for word in words:
-                # 常见的形容词后缀
+                # Common adjective suffixes.
                 if word.endswith(('ful', 'less', 'ous', 'ive', 'able', 'ible', 'al', 'ary', 'ed', 'ing')):
                     tagged.append((word, 'JJ'))
-                # 常见的副词后缀
+                # Common adverb suffixes.
                 elif word.endswith(('ly', 'wise', 'wards')):
                     tagged.append((word, 'RB'))
                 else:
-                    tagged.append((word, 'NN'))  # 默认为名词
+                    tagged.append((word, 'NN'))  # Default to noun.
             return tagged
 
     def _count_decorative_words(self, text):
         """
-        统计修饰性词汇数量（仅基于NLTK词性标注）
+        Count decorative words using POS tagging.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            dict: 修饰性词汇统计
+            dict: Decorative word statistics.
         """
         words = self._tokenize_text(text)
         if not words:
@@ -158,14 +146,14 @@ class DecorativenessEvaluator:
         tagged_words = self._pos_tag_words(words)
         total_words = len(words)
 
-        # 统计词性（仅基于POS标签）
+        # Count POS tags based on NLTK tagging.
         pos_counts = defaultdict(int)
 
         for word, pos_tag in tagged_words:
-            # 统计形容词
+            # Count adjectives.
             if pos_tag in self.decorative_pos_tags['adjectives']:
                 pos_counts['adjectives'] += 1
-            # 统计副词
+            # Count adverbs.
             elif pos_tag in self.decorative_pos_tags['adverbs']:
                 pos_counts['adverbs'] += 1
 
@@ -173,7 +161,7 @@ class DecorativenessEvaluator:
         total_adverbs = pos_counts['adverbs']
         total_decorative = total_adjectives + total_adverbs
 
-        # 计算比率
+        # Compute ratios.
         ratios = {
             'adjective_ratio': total_adjectives / total_words if total_words > 0 else 0,
             'adverb_ratio': total_adverbs / total_words if total_words > 0 else 0,
@@ -190,18 +178,18 @@ class DecorativenessEvaluator:
 
     def _calculate_decorative_diversity(self, text):
         """
-        计算修饰性词汇多样性（仅基于NLTK词性标注）
+        Calculate diversity of decorative vocabulary.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            float: 多样性分数 (0-1)
+            float: Diversity score (0-1).
         """
         words = self._tokenize_text(text)
         tagged_words = self._pos_tag_words(words)
 
-        # 提取修饰性词汇（仅基于POS标签）
+        # Extract decorative words via POS tagging.
         decorative_words = []
         for word, pos_tag in tagged_words:
             if (pos_tag in self.decorative_pos_tags['adjectives'] or
@@ -211,7 +199,7 @@ class DecorativenessEvaluator:
         if len(decorative_words) == 0:
             return 0.0
 
-        # 计算词汇多样性（不同词汇占总修饰词汇的比例）
+        # Compute vocabulary diversity (unique decorative words).
         unique_decorative = len(set(decorative_words))
         diversity = unique_decorative / len(decorative_words)
 
@@ -219,65 +207,64 @@ class DecorativenessEvaluator:
 
     def _calculate_decorative_intensity(self, stats):
         """
-        计算修饰性强度
+        Calculate decorative intensity based on decorative ratios.
 
         Args:
-            stats (dict): 修饰性词汇统计
+            stats (dict): Decorative word statistics.
 
         Returns:
-            float: 强度分数 (0-1)
+            float: Intensity score (0-1).
         """
         total_ratio = stats['total_decorative_ratio']
 
-        # 修饰性强度基于密度和分布
-        if total_ratio <= 0.05:  # 5%以下为低强度
-            intensity = total_ratio * 4  # 线性放大
-        elif total_ratio <= 0.15:  # 5-15%为中等强度
+        # Decorative intensity is based on density and distribution.
+        if total_ratio <= 0.05:  # <=5% indicates low intensity.
+            intensity = total_ratio * 4  # Scale linearly.
+        elif total_ratio <= 0.15:  # 5-15% indicates moderate intensity.
             intensity = 0.2 + (total_ratio - 0.05) * 3
-        elif total_ratio <= 0.30:  # 15-30%为高强度
+        elif total_ratio <= 0.30:  # 15-30% indicates high intensity.
             intensity = 0.5 + (total_ratio - 0.15) * 2
-        else:  # 30%以上为极高强度
+        else:  # Above 30% indicates very high intensity.
             intensity = min(0.8 + (total_ratio - 0.30), 1.0)
 
         return min(intensity, 1.0)
 
     def evaluate_text(self, text):
         """
-        评估单个文本的修饰性词汇丰富度（仅基于NLTK词性标注）
+        Evaluate the decorativeness of a single text.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            float: 修饰性丰富度分数 (0-1)，越高表示修饰越丰富
-                   分数由强度（60%）和多样性（40%）加权计算
+            float: Decorativeness score (0-1); higher values denote richer decoration.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return 0.0
 
-        # 统计修饰性词汇
+        # Collect decorative word statistics.
         stats = self._count_decorative_words(text)
 
-        # 计算多样性
+        # Compute diversity.
         diversity = self._calculate_decorative_diversity(text)
 
-        # 计算强度
+        # Compute intensity.
         intensity = self._calculate_decorative_intensity(stats)
 
-        # 综合修饰性丰富度分数
+        # Combine intensity and diversity into a decorativeness score.
         decorativeness_score = 0.6 * intensity + 0.4 * diversity
 
         return min(decorativeness_score, 1.0)
 
     def evaluate_texts(self, texts):
         """
-        批量评估文本的修饰性词汇丰富度
+        Evaluate multiple texts for decorativeness.
 
         Args:
-            texts (list): 文本列表
+            texts (list): List of text inputs.
 
         Returns:
-            list: 修饰性丰富度分数列表
+            list: Decorativeness scores.
         """
         if not isinstance(texts, list):
             texts = [texts]
@@ -291,13 +278,13 @@ class DecorativenessEvaluator:
 
     def get_detailed_scores(self, text):
         """
-        获取详细的修饰性分析分数
+        Obtain detailed decorativeness analysis scores.
 
         Args:
-            text (str): 输入文本
+            text (str): Input text.
 
         Returns:
-            dict: 详细分数
+            dict: Detailed scoring breakdown.
         """
         if not isinstance(text, str) or len(text.strip()) == 0:
             return {
@@ -329,30 +316,30 @@ class DecorativenessEvaluator:
 
     def get_score_interpretation(self, score):
         """
-        获取分数的解释
+        Provide a textual interpretation of a decorativeness score.
 
         Args:
-            score (float): 修饰性丰富度分数
+            score (float): Decorativeness score.
 
         Returns:
-            str: 分数解释
+            str: Interpretation label.
         """
         if score >= 0.7:
-            return "高修饰性"
+            return "High decorativeness"
         elif score >= 0.4:
-            return "中等修饰性"
+            return "Moderate decorativeness"
         elif score >= 0.2:
-            return "低修饰性"
+            return "Low decorativeness"
         else:
-            return "极少修饰"
+            return "Minimal decorativeness"
 
 
 def main():
-    """测试函数"""
-    # 创建评估器
+    """Demo runner for the decorativeness evaluator."""
+    # Create the evaluator.
     evaluator = DecorativenessEvaluator()
 
-    # 测试文本
+    # Test texts.
     test_texts = [
         "The beautiful, brightly colored flowers danced gracefully in the gentle, warm breeze.",
         "The system processes data.",

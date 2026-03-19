@@ -1,9 +1,6 @@
 """
 Decorativeness Evaluation Module
-修饰性丰富度评估模块
-
-This module provides functionality to evaluate the decorative linguistic elements
-in text, such as adjectives, adverbs, and other descriptive words.
+Provides functionality to evaluate decorative linguistic elements such as adjectives and adverbs.
 """
 
 from .decorativeness import DecorativenessEvaluator

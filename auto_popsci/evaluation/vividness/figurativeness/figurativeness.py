@@ -1,6 +1,6 @@
 """
-Figurativeness Evaluator using MelBERT
-用于评估文本比喻丰富度的模块
+Figurativeness Evaluator using MelBERT.
+Module for assessing metaphor richness in text.
 
 Usage:
     evaluator = FigurativenessEvaluator()
@@ -10,6 +10,7 @@ Usage:
 
 import os
 import sys
+import re
 import numpy as np
 import torch
 import torch.nn as nn
@@ -82,13 +83,16 @@ except ImportError:
 
 
 class FigurativenessEvaluator:
-    """使用MelBERT模型评估文本比喻丰富度"""
+    """Evaluate a text's figurativeness using MelBERT."""
 
-    def __init__(self, model_path=None):
+    def __init__(self, model_path=None, device=None):
         """
-        初始化比喻性评估器
+        Initialize the figurativeness evaluator.
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device:
+            self.device = torch.device(device)
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Path setup
         if model_path is None:
@@ -106,7 +110,7 @@ class FigurativenessEvaluator:
             self.initialized = False
 
     def _load_model(self):
-        """加载模型和分词器"""
+        """Load the MelBERT model and tokenizer."""
         print(f"Loading MelBERT from {self.model_path}...")
         
         # MelBERT specific args
@@ -128,7 +132,14 @@ class FigurativenessEvaluator:
             
         # 2. Load base RoBERTa model with ORIGINAL config first (to avoid weight loading mismatch)
         # roberta-base has type_vocab_size=1 by default
-        bert_model = AutoModel.from_pretrained("roberta-base")
+        # Try loading from local path first to avoid forcing internet connection
+        try:
+            bert_model = AutoModel.from_pretrained(self.model_path)
+            print(f"Loaded base model from local path: {self.model_path}")
+        except Exception as e:
+            print(f"Could not load base model from {self.model_path}, trying 'roberta-base' from Hub...")
+            bert_model = AutoModel.from_pretrained("roberta-base")
+            
         config = bert_model.config
         
         # 3. Now modify config and token_type_embeddings for MelBERT (which uses 4 token types)
@@ -174,14 +185,14 @@ class FigurativenessEvaluator:
 
     def _create_features(self, text, target_index):
         """
-        为MelBERT创建输入特征
-        
+        Create input features for MelBERT.
+
         Args:
-            text (str): 输入句子
-            target_index (int): 目标词在单词列表中的索引
-            
+            text (str): Input sentence.
+            target_index (int): Index of the target word in the token list.
+
         Returns:
-            dict: 模型输入张量
+            dict: Model input tensors.
         """
         words = text.split()
         if target_index >= len(words):
@@ -269,45 +280,57 @@ class FigurativenessEvaluator:
 
     def evaluate_text(self, text):
         """
-        评估文本
+        Evaluate the figurativeness of a single text.
         """
         if not self.initialized or not text.strip():
             return 0.0
             
-        words = text.split()
-        scores = []
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
-        # Evaluate each word
-        for i, word in enumerate(words):
-            # Skip very short words or non-alphabetic to speed up
-            if len(word) < 2 or not word.isalpha():
-                continue
+        if not sentences:
+            sentences = [text.strip()]
+            
+        sentence_scores = []
+        
+        for sentence in sentences:
+            words = sentence.split()
+            word_scores = []
+            
+            # Evaluate each word in the sentence
+            for i, word in enumerate(words):
+                # Skip very short words or non-alphabetic to speed up
+                if len(word) < 2 or not word.isalpha():
+                    continue
+                    
+                features = self._create_features(sentence, i)
+                if features is None:
+                    continue
+                    
+                try:
+                    with torch.no_grad():
+                        logits = self.model(**features)
+                        probs = torch.exp(logits) # LogSoftmax -> Prob
+                        metaphor_prob = probs[0][1].item() # Class 1 is metaphor
+                        word_scores.append(metaphor_prob)
+                except Exception:
+                    continue
+            
+            # Average score for the sentence
+            if word_scores:
+                sentence_scores.append(float(np.mean(word_scores)))
+            else:
+                sentence_scores.append(0.0)
                 
-            features = self._create_features(text, i)
-            if features is None:
-                continue
-                
-            try:
-                with torch.no_grad():
-                    logits = self.model(**features)
-                    probs = torch.exp(logits) # LogSoftmax -> Prob
-                    metaphor_prob = probs[0][1].item() # Class 1 is metaphor
-                    scores.append(metaphor_prob)
-            except Exception:
-                continue
-                
-        if not scores:
+        if not sentence_scores:
             return 0.0
             
-        # Aggregate scores - use average or max?
-        # For vividness, maybe the presence of strong metaphors matters more than density?
-        # Let's use a combination: max score * 0.5 + average score * 0.5
-        # Or simply average of top 3? 
-        # For now, simple average of identified metaphors (prob > 0.5) or just average prob
-        return np.mean(scores)
+        # Return average of sentence scores
+        return float(np.mean(sentence_scores))
 
     def evaluate_texts(self, texts):
-        """批量评估"""
+        """Evaluate multiple texts in batch."""
         return [self.evaluate_text(t) for t in texts]
 
     def get_score_interpretation(self, score):
@@ -317,7 +340,7 @@ class FigurativenessEvaluator:
 
 def main():
     evaluator = FigurativenessEvaluator()
-    text = "The sun is a golden coin in the sky."
+    text = "i am very happy"
     print(f"Text: {text}")
     print(f"Score: {evaluator.evaluate_text(text)}")
 

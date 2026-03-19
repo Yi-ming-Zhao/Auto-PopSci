@@ -1,0 +1,52 @@
+deepseek:
+  deepseek-r1:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+grok:
+  grok-4-1-fast-reasoning:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+google:
+  gemini-3-pro-preview:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+  gemini-3-flash-preview:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+openai:
+  gpt-5.2:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+  gpt-4o:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+anthropic:
+  claude-opus-4-5-20251101-thinking:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+xai:
+  grok-4-1-fast-reasoning:
+    api_key: ""
+    base_url: ""
+    model: ""
+
+qwen:
+  qwen3-235b-a22b-thinking-2507:
+    api_key: ""
+    base_url: ""
+    model: ""
+

@@ -1,79 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-使用EASSE库计算NatGeo Kids数据集的FKGL (Flesch-Kincaid Grade Level) 平均值
+Compute FKGL (Flesch-Kincaid Grade Level) averages for the NatGeo Kids dataset using the EASSE library.
 """
 
 import json
 import sys
 import os
 
-# 添加当前目录到Python路径，以便导入easse
+# Add the current directory to Python path to import easse.
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../easse'))
 
-# 尝试导入EASSE FKGL
-try:
-    import sys
-    sys.path.append('../../../easse')
-    from easse.fkgl import corpus_fkgl
-    EASSE_AVAILABLE = True
-except ImportError:
-    print("⚠️ EASSE FKGL库导入失败，将使用简单FKGL计算")
-    EASSE_AVAILABLE = False
-
-
-def simple_fkgl(sentences):
-    """简单的FKGL计算实现"""
-    if not sentences:
-        return 0.0
-
-    total_words = 0
-    total_syllables = 0
-    total_sentences = len(sentences)
-
-    for sentence in sentences:
-        words = sentence.split()
-        total_words += len(words)
-        for word in words:
-            total_syllables += count_syllables(word)
-
-    if total_sentences == 0 or total_words == 0:
-        return 0.0
-
-    # Flesch-Kincaid Grade Level formula
-    fkgl = 0.39 * (total_words / total_sentences) + 11.8 * (total_syllables / total_words) - 15.59
-    return max(0, fkgl)
-
-
-def count_syllables(word):
-    """简单的音节计数"""
-    word = word.lower()
-    vowels = "aeiouy"
-    syllable_count = 0
-    prev_char_was_vowel = False
-
-    for char in word:
-        if char in vowels:
-            if not prev_char_was_vowel:
-                syllable_count += 1
-            prev_char_was_vowel = True
-        else:
-            prev_char_was_vowel = False
-
-    if word.endswith('e') and syllable_count > 1:
-        syllable_count -= 1
-
-    return max(1, syllable_count)
+# Attempt to import EASSE FKGL (strong dependency; no simplified implementation available).
+import sys
+sys.path.append('../../../easse')
+from easse.fkgl import corpus_fkgl
 
 
 def load_natgeo_dataset(file_path):
-    """加载NatGeo Kids数据集"""
+    """Load the NatGeo Kids dataset."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
         if not isinstance(data, list):
-            print("❌ JSON文件格式错误：预期是数组")
+            print("JSON file format error: expected a list.")
             return None, None
 
         natgeo_sentences = []
@@ -93,134 +44,118 @@ def load_natgeo_dataset(file_path):
             if not natgeo_content:
                 continue
 
-            # 将长文本按句子分割
+            # Split long text into sentences.
             natgeo_text_sentences = [s.strip() for s in natgeo_content.split('.') if s.strip()]
             wiki_text_sentences = [s.strip() for s in wikipedia_content.split('.') if s.strip()]
 
-            # 收集所有句子
+            # Collect all sentences.
             natgeo_sentences.extend(natgeo_text_sentences)
             wikipedia_sentences.extend(wiki_text_sentences)
             valid_pairs += 1
 
-        print(f"📊 成功加载 {valid_pairs} 对有效文本对")
-        print(f"   NatGeo句子数: {len(natgeo_sentences)}")
-        print(f"   Wikipedia句子数: {len(wikipedia_sentences)}")
+        print(f"Loaded {valid_pairs} valid sentence pairs.")
+        print(f"  NatGeo sentences: {len(natgeo_sentences)}")
+        print(f"  Wikipedia sentences: {len(wikipedia_sentences)}")
 
         return natgeo_sentences, wikipedia_sentences
 
     except FileNotFoundError:
-        print(f"❌ 文件不存在: {file_path}")
+        print(f"File not found: {file_path}")
         return None, None
     except Exception as e:
-        print(f"❌ 加载数据时出错: {e}")
+        print(f"Error loading data: {e}")
         return None, None
 
 
 def main():
-    """主函数"""
-    print("🔧 使用EASSE库计算FKGL分数...")
+    """Main entry point."""
+    print("Computing FKGL scores with the EASSE library...")
+    print("Using the EASSE FKGL implementation for calculation.")
+    fkgl_func = corpus_fkgl
+    method_name = "EASSE_corpus_fkgl"
 
-    # 检查EASSE是否可用
-    if EASSE_AVAILABLE:
-        print("✅ 使用EASSE FKGL库进行计算")
-        fkgl_func = corpus_fkgl
-        method_name = "EASSE_corpus_fkgl"
-    else:
-        print("✅ 使用简单FKGL计算实现")
-        fkgl_func = simple_fkgl
-        method_name = "Simple_FKGL"
-
-    # 数据集路径
+    # Dataset path.
     dataset_path = 'datasets/our_dataset/natgeo_kids/natgeo_wikipedia_glm.json'
 
-    # 加载数据
+    # Load the dataset.
     natgeo_sentences, wiki_sentences = load_natgeo_dataset(dataset_path)
 
     if natgeo_sentences is None or wiki_sentences is None:
-        print("❌ 数据加载失败")
+        print("Failed to load dataset.")
         return
 
     if not natgeo_sentences or not wiki_sentences:
-        print("❌ 没有有效的数据可以分析")
+        print("No valid data available for analysis.")
         return
 
-    print(f"📈 开始计算FKGL分数...")
+    print("Starting FKGL computation...")
 
     try:
-        # 计算FKGL分数
-        print("🔍 计算NatGeo文章的FKGL分数...")
-        if EASSE_AVAILABLE:
-            natgeo_fkgl = fkgl_func(
-                sentences=natgeo_sentences,
-                tokenizer='13a'
-            )
-        else:
-            natgeo_fkgl = fkgl_func(natgeo_sentences)
+        # Calculate FKGL scores.
+        print("Computing FKGL score for NatGeo sentences...")
+        natgeo_fkgl = fkgl_func(
+            sentences=natgeo_sentences,
+            tokenizer='13a'
+        )
 
-        print("🔍 计算Wikipedia内容的FKGL分数...")
-        if EASSE_AVAILABLE:
-            wiki_fkgl = fkgl_func(
-                sentences=wiki_sentences,
-                tokenizer='13a'
-            )
-        else:
-            wiki_fkgl = fkgl_func(wiki_sentences)
+        print("Computing FKGL score for Wikipedia sentences...")
+        wiki_fkgl = fkgl_func(
+            sentences=wiki_sentences,
+            tokenizer='13a'
+        )
 
-        # 计算总体的FKGL分数
+        # Calculate the overall FKGL score.
         all_sentences = natgeo_sentences + wiki_sentences
-        if EASSE_AVAILABLE:
-            overall_fkgl = fkgl_func(
-                sentences=all_sentences,
-                tokenizer='13a'
-            )
-        else:
-            overall_fkgl = fkgl_func(all_sentences)
+        overall_fkgl = fkgl_func(
+            sentences=all_sentences,
+            tokenizer='13a'
+        )
 
-        print(f"\n🎯 FKGL分析结果:")
-        print(f"   NatGeo句子数: {len(natgeo_sentences)}")
-        print(f"   Wikipedia句子数: {len(wiki_sentences)}")
-        print(f"   总句子数: {len(all_sentences)}")
-        print(f"")
-        print(f"   NatGeo FKGL分数: {natgeo_fkgl:.4f}")
-        print(f"   Wikipedia FKGL分数: {wiki_fkgl:.4f}")
-        print(f"   总体FKGL分数: {overall_fkgl:.4f}")
-        print(f"   平均FKGL分数: {(natgeo_fkgl + wiki_fkgl) / 2:.4f}")
+        print("\nFKGL analysis results:")
+        print(f"   NatGeo sentences: {len(natgeo_sentences)}")
+        print(f"   Wikipedia sentences: {len(wiki_sentences)}")
+        print(f"   Total sentences: {len(all_sentences)}")
+        print()
+        print(f"   NatGeo FKGL score: {natgeo_fkgl:.4f}")
+        print(f"   Wikipedia FKGL score: {wiki_fkgl:.4f}")
+        print(f"   Combined FKGL score: {overall_fkgl:.4f}")
+        print(f"   Average FKGL score: {(natgeo_fkgl + wiki_fkgl) / 2:.4f}")
 
-        # FKGL解释
-        print(f"\n📖 FKGL分数解释:")
-        print(f"   1-8分: 小学水平")
-        print(f"   9-12分: 中学水平")
-        print(f"   13-16分: 高中水平")
-        print(f"   17+分: 大学及以上水平")
+        # Explain the FKGL ranges.
+        print("\nFKGL score interpretation:")
+        print("   1-8: Elementary level")
+        print("   9-12: Middle School level")
+        print("   13-16: High School level")
+        print("   17+: College level or above")
 
-        # 根据分数给出评估
-        print(f"\n📝 可读性评估:")
+        # Provide readability assessments based on the scores.
+        print("\nReadability evaluation:")
         if natgeo_fkgl <= 8:
-            print(f"   NatGeo Kids文章: ✅ 适合儿童阅读 (小学水平)")
+            print("   NatGeo Kids article: Suitable for children (Elementary level).")
         elif natgeo_fkgl <= 12:
-            print(f"   NatGeo Kids文章: ⚠️  需要一定的阅读能力 (中学水平)")
+            print("   NatGeo Kids article: Requires moderate reading ability (Middle School level).")
         else:
-            print(f"   NatGeo Kids文章: ❌ 对儿童来说过于复杂 (高中以上水平)")
+            print("   NatGeo Kids article: Too complex for children (High School level or above).")
 
         if wiki_fkgl <= 12:
-            print(f"   Wikipedia内容: ✅ 相对易读 (中学及以下水平)")
+            print("   Wikipedia content: Relatively easy to read (Middle School level or below).")
         elif wiki_fkgl <= 16:
-            print(f"   Wikipedia内容: ⚠️  需要较好的阅读能力 (高中水平)")
+            print("   Wikipedia content: Requires strong reading skills (High School level).")
         else:
-            print(f"   Wikipedia内容: ❌ 比较复杂 (大学及以上水平)")
+            print("   Wikipedia content: Complex (College level or above).")
 
-        # 简化程度分析
+        # Analyze simplification level.
         fkgl_difference = abs(natgeo_fkgl - wiki_fkgl)
-        print(f"\n📊 简化程度分析:")
-        print(f"   FKGL差异: {fkgl_difference:.4f}")
+        print("\nSimplification analysis:")
+        print(f"   FKGL difference: {fkgl_difference:.4f}")
         if fkgl_difference < 2:
-            print(f"   ✅ 两种文本的可读性相近")
+            print("   Readability is similar for both texts.")
         elif fkgl_difference < 5:
-            print(f"   ⚠️  两种文本的可读性有中等差异")
+            print("   Moderate readability gap detected.")
         else:
-            print(f"   ❌ 两种文本的可读性差异较大")
+            print("   Significant readability gap detected.")
 
-        # 保存结果
+        # Save the results.
         results = {
             'total_natgeo_sentences': len(natgeo_sentences),
             'total_wikipedia_sentences': len(wiki_sentences),
@@ -241,34 +176,34 @@ def main():
         with open('easse_fkgl_results.json', 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        print(f"\n💾 详细结果已保存到: easse_fkgl_results.json")
+        print("\nDetailed results saved to: easse_fkgl_results.json")
 
     except Exception as e:
-        print(f"❌ 计算FKGL分数时出错: {e}")
+        print(f"Error computing FKGL scores: {e}")
         import traceback
         traceback.print_exc()
 
 
 def get_readability_level(fkgl_score):
-    """根据FKGL分数获取可读性等级"""
+    """Return a readability level label for an FKGL score."""
     if fkgl_score <= 8:
-        return "小学水平 (Elementary)"
+        return "Elementary level"
     elif fkgl_score <= 12:
-        return "中学水平 (Middle School)"
+        return "Middle School level"
     elif fkgl_score <= 16:
-        return "高中水平 (High School)"
+        return "High School level"
     else:
-        return "大学及以上水平 (College)"
+        return "College level or above"
 
 
 def get_simplification_assessment(difference):
-    """根据FKGL差异评估简化程度"""
+    """Assess the simplification level based on FKGL difference."""
     if difference < 2:
-        return "可读性相近 (Similar Readability)"
+        return "Similar readability"
     elif difference < 5:
-        return "中等简化程度 (Moderate Simplification)"
+        return "Moderate simplification gap"
     else:
-        return "显著简化程度 (Significant Simplification)"
+        return "Significant simplification gap"
 
 
 if __name__ == "__main__":

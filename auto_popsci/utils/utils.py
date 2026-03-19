@@ -1,6 +1,5 @@
 import asyncio
 from prompts.prompt_template import prompt
-from openai import AsyncOpenAI
 from pprint import pprint
 import time
 
@@ -193,6 +192,7 @@ async def extract_keyfacts(args, paper, paper_title):
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
+    from openai import AsyncOpenAI
     client = AsyncOpenAI(
         api_key=current_api_key,
         base_url=current_base_url,
@@ -289,34 +289,34 @@ def cal_ppl(text):
     from transformers import GPT2LMHeadModel, GPT2Tokenizer
     import torch
 
-    # 加载预训练模型和分词器
+    # Load the pretrained model and tokenizer.
     model = GPT2LMHeadModel.from_pretrained("gpt2")
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    model.eval()  # 设为评估模式
+    model.eval()  # Set to evaluation mode.
 
-    inputs = tokenizer(text, return_tensors="pt")  # 返回PyTorch Tensor
-    input_ids = inputs.input_ids  # token id序列，例如 [464, 1234, ...]
+    inputs = tokenizer(text, return_tensors="pt")  # Return PyTorch tensors.
+    input_ids = inputs.input_ids  # Token ID sequence, e.g., [464, 1234, ...].
 
     with torch.no_grad():
         outputs = model(input_ids, labels=input_ids)
         logits = (
             outputs.logits
-        )  # 模型输出的未归一化概率（形状：[batch_size, seq_len, vocab_size]）
+        )  # Model logits (shape: [batch_size, seq_len, vocab_size]).
 
-    # 计算每个token的预测概率
-    shift_logits = logits[..., :-1, :].contiguous()  # 去掉最后一个token的logits
+    # Compute probabilities for each token prediction.
+    shift_logits = logits[..., :-1, :].contiguous()  # Drop logits for the last token.
     shift_labels = input_ids[
         ..., 1:
-    ].contiguous()  # 去掉第一个token的标签（因为模型预测下一个词）
+    ].contiguous()  # Drop the first token label because the model predicts the next token.
 
-    # 计算交叉熵损失（等价于负对数似然的平均）
+    # Compute cross-entropy loss (equivalent to average negative log-likelihood).
     loss = torch.nn.functional.cross_entropy(
         shift_logits.view(-1, shift_logits.size(-1)),
         shift_labels.view(-1),
         reduction="none",
     )
 
-    nll = loss.mean()  # 平均负对数似然
+    nll = loss.mean()  # Average negative log-likelihood.
     ppl = torch.exp(nll).item()
     print(f"Perplexity: {ppl:.2f}")
     return ppl
@@ -338,6 +338,7 @@ async def get_llm_response(args, prompt_text):
     current_api_key = auth_info[args.llm_type][args.model_type]["api_key"]
     current_base_url = auth_info[args.llm_type][args.model_type]["base_url"]
     current_model = auth_info[args.llm_type][args.model_type]["model"]
+    from openai import AsyncOpenAI
     client = AsyncOpenAI(
         api_key=current_api_key,
         base_url=current_base_url,
@@ -365,3 +366,71 @@ async def get_llm_response(args, prompt_text):
         return result
     else:
         return "No LLM response."
+
+
+def download_nltk_data(data_id):
+    """
+    Download NLTK data with a progress bar indicator.
+    
+    Args:
+        data_id (str): The ID of the NLTK package to download (e.g., 'punkt', 'wordnet').
+    """
+    import nltk
+    import threading
+    from tqdm import tqdm
+    import time
+
+    # Map some IDs to their folder names for checking
+    id_map = {
+        'punkt': 'tokenizers/punkt',
+        'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger',
+        'averaged_perceptron_tagger_eng': 'taggers/averaged_perceptron_tagger_eng',
+        'wordnet': 'corpora/wordnet',
+        'omw-1.4': 'corpora/omw-1.4'
+    }
+    
+    check_id = id_map.get(data_id, data_id)
+    
+    try:
+        nltk.data.find(check_id)
+        return
+    except LookupError:
+        pass
+
+    print(f"NLTK data '{data_id}' not found. Starting download...")
+    
+    done = False
+    error = None
+    
+    def do_download():
+        nonlocal done, error
+        try:
+            nltk.download(data_id, quiet=True)
+        except Exception as e:
+            error = e
+        done = True
+        
+    thread = threading.Thread(target=do_download)
+    thread.start()
+    
+    # Simulating progress since NLTK doesn't provide real-time percentages
+    # The progress bar will move quickly to 50%, then slow down, and pause at 95% while waiting for network.
+    with tqdm(total=100, desc=f"Downloading {data_id}", bar_format='{desc}: {percentage:3.0f}%|{bar}|') as pbar:
+        while not done:
+            time.sleep(0.5) # Slower updates
+            if pbar.n < 50:
+                pbar.update(2)
+            elif pbar.n < 95:
+                pbar.update(0.5) # Very slow progress from 50% to 95%
+            else:
+                pbar.set_description(f"Downloading {data_id} (Network IO, please wait...)")
+                pbar.refresh()
+        
+        if error:
+             pbar.set_description(f"Failed {data_id}")
+             print(f"\nError downloading {data_id}: {error}")
+        else:
+            pbar.n = 100
+            pbar.refresh()
+            pbar.set_description(f"Completed {data_id}")
+            print(f"\nSuccessfully downloaded {data_id}")

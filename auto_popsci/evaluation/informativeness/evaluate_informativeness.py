@@ -77,9 +77,13 @@ Output dictionary format in JSON:
 Do not include markdown formatting like ```json ... ```. Just the raw JSON string.
 """
 
-READER_SIMULATION_PROMPT = """
-You are a curious reader interested in science.
-Read the following popular science article and answer the multiple-choice questions based ONLY on the information provided in the article.
+READER_PROMPTS = {
+    "child": """
+You are a smart child between 8 and 12 years old.
+Read the following science article and answer the multiple-choice questions based ONLY on what is written in the article.
+- Do NOT use any knowledge you have from school or other books.
+- Only use what the article explicitly says.
+- If you cannot find the answer in the article, or if the article is too hard to understand, choose "Unknown".
 
 Article:
 {article}
@@ -90,8 +94,42 @@ Questions:
 For each question, provide your answer.
 Output strictly in JSON format as a list of strings, corresponding to the order of questions. 
 Example: ["A", "C", "B", "D", "A"]
-If you cannot answer a question based on the article, output "Unknown".
+""",
+    "teen": """
+You are a teenager between 13 and 18 years old (high school level).
+Read the following science article and answer the multiple-choice questions based ONLY on the information provided in the article.
+- Do NOT use any external knowledge.
+- Rely solely on the provided text to deduce answers.
+- If the answer is not supported by the text, choose "Unknown".
+
+Article:
+{article}
+
+Questions:
+{questions}
+
+For each question, provide your answer.
+Output strictly in JSON format as a list of strings, corresponding to the order of questions. 
+Example: ["A", "C", "B", "D", "A"]
+""",
+    "adult": """
+You are an adult reader (18+).
+Read the following science article and answer the multiple-choice questions based ONLY on the information provided in the article.
+- Do NOT use any external knowledge or prior expertise.
+- Answer strictly based on the content of the text provided.
+- If the information is not present in the article, choose "Unknown".
+
+Article:
+{article}
+
+Questions:
+{questions}
+
+For each question, provide your answer.
+Output strictly in JSON format as a list of strings, corresponding to the order of questions. 
+Example: ["A", "C", "B", "D", "A"]
 """
+}
 
 class DummyArgs:
     def __init__(self, llm_type, model_type, prompt_template):
@@ -107,80 +145,111 @@ class InformativenessEvaluator:
         else:
             self.args = args
         self.auth_info = read_yaml_file("auth.yaml")
-        # Hardcoded model requirement
-        self.model = "grok-4-1-fast-reasoning" 
+        self.reader_age = getattr(args, 'reader_age', 'adult')
+        
+        # Determine model from args (priority: model_type > llm_type > default)
+        if hasattr(self.args, 'model_type') and self.args.model_type:
+            self.model = self.args.model_type
+        elif hasattr(self.args, 'llm_type') and self.args.llm_type:
+            self.model = self.args.llm_type
+        else:
+            self.model = "gemini-2.0-flash-exp"
+            
         self.llm_type, self.client = self._init_client_and_type()
 
     def _init_client_and_type(self):
         api_key = None
         base_url = None
-        found_llm_type = self.args.llm_type # Start with default
+        found_llm_type = "unknown"
+        target_model = self.model
 
-        # 1. Check if model is explicitly under a provider in auth.yaml
+        # 1. Check if model is explicitly under a provider in auth.yaml (provider -> model_key -> config)
         for provider, models in self.auth_info.items():
             if isinstance(models, dict):
-                if self.model in models:
+                if target_model in models:
                     found_llm_type = provider
-                    api_key = models[self.model].get("api_key")
-                    base_url = models[self.model].get("base_url")
+                    config = models[target_model]
+                    if isinstance(config, dict):
+                        api_key = config.get("api_key")
+                        base_url = config.get("base_url")
+                        # Update model name from config if present (e.g. real model ID on API)
+                        self.model = config.get("model", target_model)
                     break
         
-        # 2. If not found, check if 'grok' or 'xai' exists as top level
+        # 2. If not found, check if target_model is actually a provider name
         if not api_key:
-            for provider in ['grok', 'xai', 'openai']:
-                if provider in self.auth_info:
-                    # Check if it has api_key directly or under 'default' or similar if checking for provider broadly
-                    # But we need specific model config if possible.
-                    # Assuming standard structure: provider -> model -> config
-                    pass
-
-        # 3. Fallback: use args provided constraints to look up
+            if target_model in self.auth_info and isinstance(self.auth_info[target_model], dict):
+                provider_config = self.auth_info[target_model]
+                # Pick the first available model under this provider
+                if provider_config:
+                    first_model_key = next(iter(provider_config.keys()))
+                    found_llm_type = target_model # The "llm_type" is the provider name
+                    config = provider_config[first_model_key]
+                    if isinstance(config, dict):
+                         api_key = config.get("api_key")
+                         base_url = config.get("base_url")
+                         self.model = config.get("model", first_model_key)
+        
+        # 3. Fallback: check env vars or older structure
         if not api_key:
-             # Try using the args.llm_type if it claims to have the model (which might not be true if we hardcoded model name)
-             # We rely on step 1 mostly.
-             pass
-             
-        if not api_key:
-             # Last ditch: Look for any api_key in 'grok' section if exists
-             if 'grok' in self.auth_info:
-                 found_llm_type = 'grok'
-                 # It might be in 'grok' -> 'grok-4-1-fast-reasoning' OR just 'grok' -> 'api_key' ?
-                 # Based on utils.py: auth_info[args.llm_type][args.model_type]["api_key"]
-                 # So it must be nested.
-                 if self.model in self.auth_info['grok']:
-                     api_key = self.auth_info['grok'][self.model].get("api_key")
-                     base_url = self.auth_info['grok'][self.model].get("base_url")
-
+            for provider in ['grok', 'xai', 'openai', 'gemini', 'deepseek']:
+                if provider in self.auth_info and target_model in self.auth_info[provider]:
+                     pass # Should have been caught by step 1
+                
         if not api_key:
             print(f"Warning: API key for {self.model} not found in auth.yaml. Checking env vars...")
             api_key = os.getenv("OPENAI_API_KEY") # Fallback to env
             if not api_key:
-                raise ValueError(f"Could not find API key for {self.model}")
+                 # If we still can't find it, we might be in trouble, but let's try to proceed 
+                 # assuming the user might have set env vars for specific providers we missed
+                 pass
+            else:
+                found_llm_type = "env"
 
         print(f"Initialized client with model {self.model} (provider: {found_llm_type})")
-        return found_llm_type, AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return found_llm_type, AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=180.0)
 
-    async def get_llm_response(self, prompt_text, json_mode=True):
-        try:
-            messages = [{"role": "user", "content": prompt_text}]
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.0 if json_mode else 0.7 
-            )
-            content = response.choices[0].message.content.strip()
-            # Clean markdown code blocks
-            if content.startswith("```"):
-                lines = content.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                content = "\n".join(lines)
-            return content
-        except Exception as e:
-            print(f"Error calling LLM: {e}")
-            return None
+    async def get_llm_response(self, prompt_text, json_mode=True, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                messages = [{"role": "user", "content": prompt_text}]
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.0 if json_mode else 0.7 
+                )
+                content = response.choices[0].message.content.strip()
+                # Clean markdown code blocks
+                if content.startswith("```"):
+                    lines = content.split("\n")
+                    if lines[0].startswith("```"):
+                        lines = lines[1:]
+                    if lines and lines[-1].startswith("```"):
+                        lines = lines[:-1]
+                    content = "\n".join(lines)
+                return content
+            except Exception as e:
+                error_msg = str(e)
+                # Check whether the error is retryable.
+                is_retryable = (
+                    "timeout" in error_msg.lower() or
+                    "520" in error_msg or
+                    "502" in error_msg or
+                    "503" in error_msg or
+                    "524" in error_msg or
+                    "rate limit" in error_msg.lower() or
+                    "connection" in error_msg.lower()
+                )
+                
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 sec.
+                    print(f"Retrying {attempt + 1}/{max_retries}, waiting {wait_time}s: {error_msg[:100]}")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                print(f"Error calling LLM: {e}")
+                return None
+        return None
 
     async def extract_keyfacts_wrapper(self, text, title):
         # Use utils.extract_keyfacts
@@ -261,7 +330,11 @@ class InformativenessEvaluator:
         # Format questions for reader
         q_formatted = json.dumps(questions, indent=2)
         
-        prompt = READER_SIMULATION_PROMPT.format(article=article_text, questions=q_formatted)
+        # Select prompt based on reader_age
+        age_group = getattr(self, 'reader_age', 'adult') # Default to adult if not set
+        prompt_template = READER_PROMPTS.get(age_group, READER_PROMPTS['adult'])
+        
+        prompt = prompt_template.format(article=article_text, questions=q_formatted)
         response = await self.get_llm_response(prompt)
         
         try:
@@ -303,9 +376,21 @@ class InformativenessEvaluator:
         if not matched_keyfacts:
             matched_keyfacts = []
 
-        # 6. Generate MCQs based on MATCHED keyfacts
-        # Max 5
-        mcqs = await self.generate_mcqs(matched_keyfacts[:20], num_questions=5) # Limit context
+        # 6. Generate MCQs based on MATCHED POPULAR SCIENCE keyfacts
+        # matched_keyfacts is a list of [popsci_kf, wiki_kf] pairs (from keyfact_alignment prompt)
+        # We want to use the popsci_kf part to generate questions, to test if the article conveys these concepts correctly.
+        target_keyfacts_for_qa = []
+        if matched_keyfacts and isinstance(matched_keyfacts, list):
+            for item in matched_keyfacts:
+                if isinstance(item, list) and len(item) > 0:
+                    # Item 0 is the generated (PopSci) keyfact according to prompt template
+                    target_keyfacts_for_qa.append(item[0])
+                elif isinstance(item, dict):
+                     # Fallback if structure is flat (should imply direct match or old prompt)
+                     target_keyfacts_for_qa.append(item)
+        
+        # Max 20 facts context
+        mcqs = await self.generate_mcqs(target_keyfacts_for_qa[:20], num_questions=5) # Limit context
         
         # 7. Simulate Reader
         reader_answers = await self.simulate_reader(popsci_text, mcqs)
@@ -396,6 +481,7 @@ async def main():
     parser.add_argument("--llm_type", type=str, default="openai")
     parser.add_argument("--prompt_template", type=str, default="key_fact_extraction", help="Prompt template name")
     parser.add_argument("--model_type", type=str, default="grok-4-1-fast-reasoning")
+    parser.add_argument("--reader_age", type=str, choices=['child', 'teen', 'adult'], default='adult', help="Simulated reader age group")
     
     args = parser.parse_args()
     

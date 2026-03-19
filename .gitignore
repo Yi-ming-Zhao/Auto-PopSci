@@ -1,3 +1,8 @@
 auto_popsci/auth.yaml
-*.yaml
+my_auth.yaml
 .DS_Store
+.claude
+.vscode
+*.pdf
+flatten_qwen_models.py
+auto_popsci/evaluation/vividness/figurativeness/MelBERT/data_sample/

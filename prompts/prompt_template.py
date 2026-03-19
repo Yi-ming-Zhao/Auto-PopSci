@@ -33,7 +33,14 @@ prompt = {
     "keyfact_alignment": """
     You are an expert in aligning key facts with the original paper. You will be given two lists of key facts, one is the ground truth key facts and the other is the generated key facts. Your task is to align the generated key facts with the original paper. You should perform the task in the following steps:
     1. Read the ground truth key facts and the generated key facts to fully understand the content.
-    2. For each generated key fact, find the corresponding ground truth key fact. The corresponding ground truth key fact is the one that has the same entity and behavior as the generated key fact. If the generated key fact is found in the ground truth key facts, then it is considered as a true positive.If the generated key fact is not found in the ground truth key facts, then it is considered as a false positive.
+    2. For each generated key fact, find the corresponding ground truth key fact. The corresponding ground truth key fact is the one that has the same entity and behavior as the generated key fact.
+    
+    IMPORTANT CONSTRAINTS:
+    - One-to-one mapping: Each generated key fact must match at most ONE ground truth key fact.
+    - Each ground truth key fact must be matched by at most ONE generated key fact.
+    - If there are ambiguous matches, choose the best single match.
+    - Do not reuse any key fact in multiple pairs.
+    
     3. Return a list of tuples, where each tuple contains the related generated key fact and the corresponding ground truth key fact. That means you should only return the true positive key facts.
     4. The output string should be in JSON format, and should be able to directly parse into a JSON object, which means only the structured key facts should be included. Don't output anything like ```json at the beginning and ``` at the end.
     
@@ -60,4 +67,37 @@ prompt = {
     The generated key facts are as follows:
     {generated_key_facts}
     """
+,
+    "coherence_evaluation": """
+    You will be given a popular science article written based on a specific topic or instruction.
+
+    Your task is to rate the article on one metric.
+
+    Please make sure you read and understand these instructions carefully. Please keep this document open while reviewing, and refer to it as needed.
+
+    Evaluation Criteria:
+
+    Coherence (1-5) - the logical flow and organizational quality of the explanation. For popular science writing, coherence means the text should guide the reader smoothly from introductory concepts to more complex details. It should not be a disjointed collection of facts. Instead, it must demonstrate a clear logical progression (e.g., introducing a phenomenon -> explaining the cause -> discussing implications). Transitions between sentences and paragraphs should be natural, maintaining a consistent focus on the topic.
+
+    Evaluation Steps:
+
+    Read the Topic/Instruction to understand the scientific subject matter intended for explanation.
+    Read the Generated Article carefully. Analyze the structure of the text:
+    Does it have a clear introduction, body, and conclusion?
+    Logical Progression: Do the ideas build upon each other? (e.g., Are terms defined before they are used in complex arguments? Is there a clear cause-and-effect relationship?)
+    Transitions: Are there smooth transitions between paragraphs? Does the text jump abruptly between sub-topics without connection?
+    Assign a score for coherence on a scale of 1 to 5, where 1 is the lowest and 5 is the highest based on the Evaluation Criteria.
+    Example:
+
+    Topic/Instruction:
+
+    {topic}
+
+    Generated Article:
+
+    {article}
+
+    Evaluation Form (scores ONLY):
+
+    - Coherence:"""
 }
