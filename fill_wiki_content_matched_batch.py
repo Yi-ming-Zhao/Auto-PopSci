@@ -15,6 +15,7 @@ SECTION_HEADING_RE = re.compile(r"\n(==\s*[^=\n][^=\n]*\s*==)\n")
 DEFAULT_MODEL_PROVIDER = "glm"
 DEFAULT_MODEL_KEY = "GLM-4.6V-FlashX"
 TERMINAL_BATCH_STATES = {"completed", "failed", "expired", "cancelled"}
+SECTION_PREVIEW_CHARS = 2500
 
 
 def load_auth_config(auth_path: Path, provider: str, model_key: str) -> dict:
@@ -71,9 +72,9 @@ def build_prompt(record: dict, sections: list[dict]) -> str:
         "0 = unrelated or mostly meta/reference/link material.\n"
     )
     output_spec = (
-        'Return JSON only in this exact shape: {"scores":[{"index":0,"score":10}]}\n'
-        "The scores array must contain exactly one item for each section index below.\n"
-        "Each score must be an integer from 0 to 10.\n"
+        'Return JSON only in this exact shape: {"scores":[10, 9, 0]}\n'
+        "The scores array length must exactly match the number of sections below.\n"
+        "Each element must be an integer from 0 to 10.\n"
         "Do not include explanations or markdown fences.\n"
     )
     payload = {
@@ -81,7 +82,14 @@ def build_prompt(record: dict, sections: list[dict]) -> str:
         "popsci_content": record["popsci_content"],
         "wiki_title": record["wiki_title"],
         "sections": [
-            {"index": idx, "heading": section["heading"], "content": section["content"]}
+            {
+                "index": idx,
+                "heading": section["heading"],
+                "content_preview": (
+                    section["content"][:SECTION_PREVIEW_CHARS]
+                    + (" ...[TRUNCATED]" if len(section["content"]) > SECTION_PREVIEW_CHARS else "")
+                ),
+            }
             for idx, section in enumerate(sections)
         ],
     }
@@ -161,6 +169,7 @@ def create_batch_input(
     dataset_path: Path,
     temp_dir: Path,
     model_name: str,
+    selected_line_indices: set[int] | None,
 ) -> tuple[Path, list[dict], dict]:
     records = []
     batch_input_path = temp_dir / f"{dataset_path.stem}.batch-input.jsonl"
@@ -168,6 +177,8 @@ def create_batch_input(
         "w", encoding="utf-8"
     ) as out:
         for line_idx, line in enumerate(src):
+            if selected_line_indices is not None and line_idx not in selected_line_indices:
+                continue
             record = json.loads(line)
             sections = split_wiki_sections(record["wiki_content"])
             if not sections:
@@ -213,28 +224,39 @@ def wait_for_batch(client: BigModelBatchClient, batch_id: str, poll_interval: in
 
 def parse_scores(raw_text: str, expected_count: int, custom_id: str) -> list[int]:
     cleaned = strip_code_fences(raw_text)
-    payload = json.loads(cleaned)
-    scores = payload.get("scores")
-    if not isinstance(scores, list) or len(scores) != expected_count:
-        raise ValueError(
-            f"{custom_id}: expected {expected_count} scores, got {len(scores) if isinstance(scores, list) else 'invalid'}"
-        )
+    try:
+        payload = json.loads(cleaned)
+        scores = payload.get("scores")
+        if isinstance(scores, list) and len(scores) == expected_count:
+            parsed_scores = []
+            for score in scores:
+                if not isinstance(score, int) or not 0 <= score <= 10:
+                    raise ValueError(f"{custom_id}: invalid score {score!r}")
+                parsed_scores.append(score)
+            return parsed_scores
+    except Exception:
+        pass
 
-    parsed_scores = [None] * expected_count
-    for item in scores:
-        if not isinstance(item, dict):
-            raise ValueError(f"{custom_id}: invalid score item {item!r}")
-        index = item.get("index")
-        score = item.get("score")
-        if not isinstance(index, int) or not 0 <= index < expected_count:
-            raise ValueError(f"{custom_id}: invalid section index {index!r}")
-        if not isinstance(score, int) or not 0 <= score <= 10:
-            raise ValueError(f"{custom_id}: invalid score {score!r}")
-        parsed_scores[index] = score
+    compact_numbers = re.findall(r'"scores"\s*:\s*\[([^\]]+)\]', cleaned, flags=re.S)
+    if compact_numbers:
+        numbers = re.findall(r'-?\d+', compact_numbers[0])
+        if len(numbers) == expected_count:
+            parsed_scores = [int(num) for num in numbers]
+            if all(0 <= score <= 10 for score in parsed_scores):
+                return parsed_scores
 
-    if any(score is None for score in parsed_scores):
-        raise ValueError(f"{custom_id}: missing scores for some sections")
-    return parsed_scores
+    indexed_pairs = re.findall(r'"index"\s*:\s*(\d+)\s*,\s*"score"\s*:\s*(\d+)', cleaned)
+    if indexed_pairs:
+        parsed_scores = [None] * expected_count
+        for index_str, score_str in indexed_pairs:
+            index = int(index_str)
+            score = int(score_str)
+            if 0 <= index < expected_count and 0 <= score <= 10:
+                parsed_scores[index] = score
+        if all(score is not None for score in parsed_scores):
+            return parsed_scores
+
+    raise ValueError(f"{custom_id}: unable to parse valid scores from model response")
 
 
 def load_batch_outputs(output_path: Path) -> dict:
@@ -285,18 +307,24 @@ def merge_results(records: list[dict], outputs: dict, dataset_path: Path) -> lis
             )
         updated = dict(record_info["record"])
         updated["wiki_content_matched"] = json.dumps(matched, ensure_ascii=False)
-        merged_records.append(updated)
+        merged_records.append({"line_idx": record_info["line_idx"], "record": updated})
     return merged_records
 
 
 def atomic_rewrite_jsonl(dataset_path: Path, merged_records: list[dict]) -> None:
+    merged_by_line_idx = {record["line_idx"]: record["record"] for record in merged_records}
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=dataset_path.parent, delete=False
     ) as tmp:
         tmp_path = Path(tmp.name)
-        for record in merged_records:
-            tmp.write(json.dumps(record, ensure_ascii=False))
-            tmp.write("\n")
+        with dataset_path.open("r", encoding="utf-8") as src:
+            for line_idx, line in enumerate(src):
+                if line_idx in merged_by_line_idx:
+                    record = merged_by_line_idx[line_idx]
+                else:
+                    record = json.loads(line)
+                tmp.write(json.dumps(record, ensure_ascii=False))
+                tmp.write("\n")
     tmp_path.replace(dataset_path)
 
 
@@ -307,6 +335,7 @@ def process_dataset_file(
     poll_interval: int,
     keep_temp: bool,
     resume_batch_id: str | None,
+    selected_line_indices: set[int] | None,
 ) -> None:
     print(f"Processing {dataset_path}")
     temp_manager = None
@@ -316,7 +345,14 @@ def process_dataset_file(
         temp_manager = tempfile.TemporaryDirectory(prefix=f"{dataset_path.stem}-batch-")
         temp_dir = Path(temp_manager.name)
     try:
-        batch_input_path, records, metadata = create_batch_input(dataset_path, temp_dir, model_name)
+        batch_input_path, records, metadata = create_batch_input(
+            dataset_path,
+            temp_dir,
+            model_name,
+            selected_line_indices,
+        )
+        if not records:
+            raise ValueError(f"No records selected for {dataset_path}")
         if resume_batch_id:
             batch_id = resume_batch_id
             print(f"Resuming existing batch: {batch_id}")
@@ -378,6 +414,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Resume waiting/downloading for an existing batch id instead of creating a new one",
     )
+    parser.add_argument(
+        "--line-indices",
+        default=None,
+        help="Comma-separated 0-based line indices to process. If omitted, process all lines.",
+    )
     return parser.parse_args()
 
 
@@ -397,6 +438,10 @@ def main() -> int:
     if invalid:
         raise ValueError(f"Only .jsonl files are supported: {invalid}")
 
+    selected_line_indices = None
+    if args.line_indices:
+        selected_line_indices = {int(part) for part in args.line_indices.split(",") if part.strip()}
+
     for dataset_path in dataset_paths:
         process_dataset_file(
             client=client,
@@ -405,6 +450,7 @@ def main() -> int:
             poll_interval=args.poll_interval,
             keep_temp=args.keep_temp,
             resume_batch_id=args.resume_batch_id,
+            selected_line_indices=selected_line_indices,
         )
     return 0
 
