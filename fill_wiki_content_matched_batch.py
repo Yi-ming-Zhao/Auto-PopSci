@@ -60,39 +60,64 @@ def split_wiki_sections(wiki_content: str) -> list[dict]:
     return sections
 
 
-def build_prompt(record: dict, sections: list[dict]) -> str:
-    rubric = (
-        "You score how relevant each Wikipedia section is to the popular-science article.\n"
-        "Use a lenient scale.\n"
-        "10 = same main topic/event and strongly overlapping core content.\n"
-        "9 = clearly matching and highly relevant even if not identical.\n"
-        "7-8 = same entity/topic with meaningful background overlap.\n"
-        "4-6 = partially relevant or tangential.\n"
-        "1-3 = weak relevance.\n"
-        "0 = unrelated or mostly meta/reference/link material.\n"
-    )
+def build_prompt(record: dict, sections: list[dict], safe_mode: bool = False) -> str:
+    if safe_mode:
+        rubric = (
+            "Score topical overlap between encyclopedia sections and an article.\n"
+            "Use integers 0-10.\n"
+            "10 = same main topic. 9 = clearly matching. 7-8 = meaningful overlap. "
+            "4-6 = partial overlap. 1-3 = weak overlap. 0 = unrelated.\n"
+        )
+        payload = {
+            "article_title": record["popsci_title"],
+            "article_excerpt": record["popsci_content"][:1200],
+            "wiki_title": record["wiki_title"],
+            "sections": [
+                {
+                    "index": idx,
+                    "heading": section["heading"],
+                    "content_preview": (
+                        section["content"][:1200]
+                        + (" ...[TRUNCATED]" if len(section["content"]) > 1200 else "")
+                    ),
+                }
+                for idx, section in enumerate(sections)
+            ],
+        }
+    else:
+        rubric = (
+            "You score how relevant each Wikipedia section is to the popular-science article.\n"
+            "Use a lenient scale.\n"
+            "10 = same main topic/event and strongly overlapping core content.\n"
+            "9 = clearly matching and highly relevant even if not identical.\n"
+            "7-8 = same entity/topic with meaningful background overlap.\n"
+            "4-6 = partially relevant or tangential.\n"
+            "1-3 = weak relevance.\n"
+            "0 = unrelated or mostly meta/reference/link material.\n"
+        )
+        payload = {
+            "popsci_title": record["popsci_title"],
+            "popsci_content": record["popsci_content"],
+            "wiki_title": record["wiki_title"],
+            "sections": [
+                {
+                    "index": idx,
+                    "heading": section["heading"],
+                    "content_preview": (
+                        section["content"][:SECTION_PREVIEW_CHARS]
+                        + (" ...[TRUNCATED]" if len(section["content"]) > SECTION_PREVIEW_CHARS else "")
+                    ),
+                }
+                for idx, section in enumerate(sections)
+            ],
+        }
+
     output_spec = (
         'Return JSON only in this exact shape: {"scores":[10, 9, 0]}\n'
         "The scores array length must exactly match the number of sections below.\n"
         "Each element must be an integer from 0 to 10.\n"
         "Do not include explanations or markdown fences.\n"
     )
-    payload = {
-        "popsci_title": record["popsci_title"],
-        "popsci_content": record["popsci_content"],
-        "wiki_title": record["wiki_title"],
-        "sections": [
-            {
-                "index": idx,
-                "heading": section["heading"],
-                "content_preview": (
-                    section["content"][:SECTION_PREVIEW_CHARS]
-                    + (" ...[TRUNCATED]" if len(section["content"]) > SECTION_PREVIEW_CHARS else "")
-                ),
-            }
-            for idx, section in enumerate(sections)
-        ],
-    }
     return "\n".join([rubric, output_spec, json.dumps(payload, ensure_ascii=False)])
 
 
@@ -170,6 +195,7 @@ def create_batch_input(
     temp_dir: Path,
     model_name: str,
     selected_line_indices: set[int] | None,
+    safe_mode: bool,
 ) -> tuple[Path, list[dict], dict]:
     records = []
     batch_input_path = temp_dir / f"{dataset_path.stem}.batch-input.jsonl"
@@ -198,7 +224,7 @@ def create_batch_input(
                 "url": "/v4/chat/completions",
                 "body": {
                     "model": model_name,
-                    "messages": [{"role": "user", "content": build_prompt(record, sections)}],
+                    "messages": [{"role": "user", "content": build_prompt(record, sections, safe_mode=safe_mode)}],
                     "temperature": 0.0,
                 },
             }
@@ -227,12 +253,14 @@ def parse_scores(raw_text: str, expected_count: int, custom_id: str) -> list[int
     try:
         payload = json.loads(cleaned)
         scores = payload.get("scores")
-        if isinstance(scores, list) and len(scores) == expected_count:
+        if isinstance(scores, list) and len(scores) in {expected_count, expected_count - 1}:
             parsed_scores = []
             for score in scores:
                 if not isinstance(score, int) or not 0 <= score <= 10:
                     raise ValueError(f"{custom_id}: invalid score {score!r}")
                 parsed_scores.append(score)
+            if len(parsed_scores) == expected_count - 1:
+                parsed_scores.append(0)
             return parsed_scores
     except Exception:
         pass
@@ -240,8 +268,10 @@ def parse_scores(raw_text: str, expected_count: int, custom_id: str) -> list[int
     compact_numbers = re.findall(r'"scores"\s*:\s*\[([^\]]+)\]', cleaned, flags=re.S)
     if compact_numbers:
         numbers = re.findall(r'-?\d+', compact_numbers[0])
-        if len(numbers) == expected_count:
+        if len(numbers) in {expected_count, expected_count - 1}:
             parsed_scores = [int(num) for num in numbers]
+            if len(parsed_scores) == expected_count - 1:
+                parsed_scores.append(0)
             if all(0 <= score <= 10 for score in parsed_scores):
                 return parsed_scores
 
@@ -336,6 +366,7 @@ def process_dataset_file(
     keep_temp: bool,
     resume_batch_id: str | None,
     selected_line_indices: set[int] | None,
+    safe_mode: bool,
 ) -> None:
     print(f"Processing {dataset_path}")
     temp_manager = None
@@ -350,6 +381,7 @@ def process_dataset_file(
             temp_dir,
             model_name,
             selected_line_indices,
+            safe_mode,
         )
         if not records:
             raise ValueError(f"No records selected for {dataset_path}")
@@ -419,6 +451,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated 0-based line indices to process. If omitted, process all lines.",
     )
+    parser.add_argument(
+        "--safe-mode",
+        action="store_true",
+        help="Use a shorter, more neutral prompt for retrying rows that hit provider safety filters.",
+    )
     return parser.parse_args()
 
 
@@ -451,6 +488,7 @@ def main() -> int:
             keep_temp=args.keep_temp,
             resume_batch_id=args.resume_batch_id,
             selected_line_indices=selected_line_indices,
+            safe_mode=args.safe_mode,
         )
     return 0
 
